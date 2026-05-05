@@ -4,11 +4,16 @@
       "ssid": "Pi_Clock_AP",
       "password": "12345678"
     },
-    "weather_api_key": "your_openweathermap_api_key_here"
+    "weather_api_key": "your_openweathermap_api_key_here",
+    "discord_webhook_url": "https://discord.com/api/webhooks/your_webhook_id/your_webhook_token",
+    "lan_admin": {
+      "username": "admin",
+      "password": "admin"
+    }
   },
   "profiles": [
     {
-      "name": "家裡",
+      "name": "Home",
       "wifi": {
         "ssid": "your_home_wifi_ssid",
         "password": "your_home_wifi_password"
@@ -28,7 +33,7 @@
       }
     },
     {
-      "name": "公司",
+      "name": "Office",
       "wifi": {
         "ssid": "your_office_wifi_ssid",
         "password": "your_office_wifi_password"
@@ -48,7 +53,7 @@
       }
     },
     {
-      "name": "咖啡廳",
+      "name": "Cafe",
       "wifi": {
         "ssid": "your_cafe_wifi_ssid",
         "password": "your_cafe_wifi_password"
@@ -68,6 +73,6 @@
       }
     }
   ],
-  "active_profile": "家裡",
+  "active_profile": "Home",
   "last_connected_profile": null
 }

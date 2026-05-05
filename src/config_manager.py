@@ -27,7 +27,12 @@ class ConfigManager:
                     "ssid": "Pi_Clock_AP",
                     "password": "12345678"
                 },
-                "weather_api_key": ""
+                "weather_api_key": "",
+                "discord_webhook_url": "",
+                "lan_admin": {
+                    "username": "admin",
+                    "password": "admin"
+                }
             },
             "profiles": [
                 {
@@ -68,7 +73,12 @@ class ConfigManager:
                         "ssid": legacy.get("ap_mode", {}).get("ssid", "Pi_Clock_AP"),
                         "password": legacy.get("ap_mode", {}).get("password", "12345678")
                     },
-                    "weather_api_key": legacy.get("weather", {}).get("api_key", "")
+                    "weather_api_key": legacy.get("weather", {}).get("api_key", ""),
+                    "discord_webhook_url": "",
+                    "lan_admin": {
+                        "username": "admin",
+                        "password": "admin"
+                    }
                 },
                 "profiles": [
                     {

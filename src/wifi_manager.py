@@ -5,6 +5,7 @@ import time
 import machine
 import gc
 import ujson
+import ubinascii
 from display_manager import update_display_Restart, update_display_AP
 from config_manager import config_manager
 from chime import Chime
@@ -251,6 +252,8 @@ def send_html_page(cl, networks, current_profile=None):
     api_key = config_manager.get_global("weather_api_key", "")
     ap_ssid = config_manager.get("ap_mode.ssid", "Pi_Clock_AP")
     ap_password = config_manager.get("ap_mode.password", "12345678")
+    discord_webhook_url = config_manager.get_global("discord_webhook_url", "")
+    lan_admin_username = config_manager.get_global("lan_admin.username", "admin")
     adc_value = machine.ADC(machine.Pin(26)).read_u16()
 
     # Current profile settings
@@ -331,8 +334,329 @@ def send_html_page(cl, networks, current_profile=None):
     api_key_display = f"{api_key[:7]}...{api_key[-4:]}" if api_key and len(api_key) > 11 else ("已設定" if api_key else "")
     send_chunk(cl, f'<fieldset><legend>全局設定 (所有設定檔共用)</legend><div class="form-group"><label for="api_key">天氣 API Key:</label><input type="text" id="api_key" name="api_key" value="{html_escape(api_key_display)}" placeholder="留空表示不修改" readonly></div><div class="form-group"><label for="ap_mode_ssid">AP 模式 SSID:</label><input id="ap_mode_ssid" name="ap_mode_ssid" value="{html_escape(ap_ssid)}"></div><div class="form-group"><label for="ap_mode_password">AP 模式密碼:</label><input type="password" id="ap_mode_password" name="ap_mode_password" placeholder="已設定（留空表示不修改）"></div></fieldset>'.encode('utf-8'))
 
+    send_chunk(cl, f'<fieldset><legend>LAN Admin & Discord</legend><div class="form-group"><label for="discord_webhook_url">Discord Webhook URL:</label><input type="url" id="discord_webhook_url" name="discord_webhook_url" value="{html_escape(discord_webhook_url)}" placeholder="https://discord.com/api/webhooks/..."></div><div class="form-group"><label for="lan_admin_username">LAN Admin Username:</label><input id="lan_admin_username" name="lan_admin_username" value="{html_escape(lan_admin_username)}"></div><div class="form-group"><label for="lan_admin_password">LAN Admin Password:</label><input type="password" id="lan_admin_password" name="lan_admin_password" placeholder="Leave blank to keep current password"></div></fieldset>'.encode('utf-8'))
+
     # Send footer with JavaScript
     send_chunk(cl, HTML_FOOTER)
+
+def _read_http_request(cl, max_request_size=4096):
+    cl_file = cl.makefile("rwb", 0)
+    request = ""
+
+    while True:
+        try:
+            line = cl_file.readline()
+            if not line or line == b"\r\n":
+                break
+            if len(request) + len(line) > max_request_size:
+                print("Warning: Request too large, rejecting.")
+                cl.send(b"HTTP/1.0 413 Request Entity Too Large\r\n\r\n")
+                return None
+            request += line.decode()
+        except OSError:
+            break
+
+    return request
+
+def _get_query_params(request):
+    if "?" not in request:
+        return {}
+    query_start = request.find("?") + 1
+    query_end = request.find(" ", query_start)
+    query_string = request[query_start:query_end]
+    return parse_query_string(query_string)
+
+def _expected_basic_auth_header():
+    username = config_manager.get_global("lan_admin.username", "admin") or "admin"
+    password = config_manager.get_global("lan_admin.password", "admin") or "admin"
+    token = ubinascii.b2a_base64((username + ":" + password).encode()).decode().strip()
+    return "Authorization: Basic " + token
+
+def _send_auth_required(cl):
+    cl.send(b'HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Pi Clock LAN Admin"\r\n\r\nUnauthorized')
+
+def _is_lan_authorized(request):
+    return _expected_basic_auth_header() in request
+
+def _get_page_networks(require_auth=False):
+    if not require_auth:
+        return scan_networks()
+
+    active_profile = config_manager.get_active_profile()
+    ssid = active_profile.get("wifi", {}).get("ssid", "") if active_profile else ""
+    return [{"ssid": ssid, "rssi": 0}] if ssid else []
+
+def _save_settings_from_params(params):
+    original_name = params.get("original_profile_name", "")
+    new_name = params.get("profile_name", "")
+    original_profile = config_manager.get_profile(original_name)
+
+    wifi_password = params.get("password", "")
+    if not wifi_password and original_profile:
+        wifi_password = original_profile.get("wifi", {}).get("password", "")
+
+    profile_data = {
+        "name": new_name,
+        "wifi": {
+            "ssid": params.get("ssid", ""),
+            "password": wifi_password
+        },
+        "weather_location": params.get("location", "Taipei"),
+        "user": {
+            "birthday": params.get("birthday", "0101"),
+            "light_threshold": int(params.get("light_threshold", "56000")),
+            "image_interval_min": int(params.get("image_interval_min", "2")),
+            "timezone_offset": int(params.get("timezone_offset", "8"))
+        },
+        "chime": {
+            "enabled": params.get("chime_enabled") == "true",
+            "interval": params.get("chime_interval", "hourly"),
+            "pitch": int(params.get("chime_pitch", "880")),
+            "volume": int(params.get("chime_volume", "80"))
+        }
+    }
+
+    config_manager.update_profile(original_name, profile_data)
+
+    api_key_input = params.get("api_key", "")
+    if api_key_input and not api_key_input.startswith("å·²è¨­å®š") and "..." not in api_key_input:
+        config_manager.set_global("weather_api_key", api_key_input)
+
+    config_manager.set_global("ap_mode.ssid", params.get("ap_mode_ssid", "Pi_Clock_AP"))
+
+    ap_password_input = params.get("ap_mode_password", "")
+    if ap_password_input:
+        config_manager.set_global("ap_mode.password", ap_password_input)
+
+    config_manager.set_global("discord_webhook_url", params.get("discord_webhook_url", ""))
+    config_manager.set_global("lan_admin.username", params.get("lan_admin_username", "admin") or "admin")
+
+    lan_admin_password = params.get("lan_admin_password", "")
+    if lan_admin_password:
+        config_manager.set_global("lan_admin.password", lan_admin_password)
+
+    config_manager.set_active_profile(new_name)
+    config_manager.set_last_connected_profile(new_name)
+
+def handle_config_request(cl, request, require_auth=False):
+    if not request:
+        cl.close()
+        return
+
+    print(f"Request: {request[:100] + '...' if len(request) > 100 else request}")
+
+    if require_auth and not _is_lan_authorized(request):
+        _send_auth_required(cl)
+        cl.close()
+        return
+
+    if "GET /favicon.ico" in request:
+        cl.send(b"HTTP/1.0 404 Not Found\r\n\r\n")
+        cl.close()
+        return
+
+    if "GET /adc" in request:
+        adc_value = machine.ADC(machine.Pin(26)).read_u16()
+        response = "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"adc\": " + str(adc_value) + "}"
+        cl.send(response.encode())
+        cl.close()
+        return
+
+    if "GET /test_chime" in request:
+        params = _get_query_params(request)
+        if not verify_csrf_token(params):
+            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+            cl.close()
+            return
+
+        try:
+            chime_obj = Chime()
+            chime_obj.do_chime(
+                pitch=int(params.get("pitch", "880")),
+                volume=int(params.get("volume", "80"))
+            )
+            chime_obj.deinit()
+            cl.send(b"HTTP/1.0 200 OK\r\n\r\nOK")
+        except Exception as e:
+            print(f"Error: Chime test failed. {e}")
+            cl.send(b"HTTP/1.0 500 Internal Server Error\r\n\r\nError")
+        cl.close()
+        return
+
+    if "GET /edit_profile?" in request:
+        params = _get_query_params(request)
+        profile = config_manager.get_profile(params.get("name", ""))
+        if profile:
+            send_html_page(cl, _get_page_networks(require_auth), profile)
+        else:
+            cl.send(b"HTTP/1.0 404 Not Found\r\n\r\nProfile not found")
+        cl.close()
+        return
+
+    if "GET /new_profile?" in request:
+        params = _get_query_params(request)
+        if not verify_csrf_token(params):
+            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+            cl.close()
+            return
+
+        new_name = params.get("name", "")
+        if not new_name:
+            cl.send(b"HTTP/1.0 400 Bad Request\r\n\r\nInvalid profile name")
+            cl.close()
+            return
+
+        base_profile = config_manager.get_active_profile()
+        new_profile = {
+            "name": new_name,
+            "wifi": {"ssid": "", "password": ""},
+            "weather_location": base_profile.get("weather_location", "Taipei") if base_profile else "Taipei",
+            "user": base_profile.get("user", {
+                "birthday": "0101",
+                "light_threshold": 56000,
+                "image_interval_min": 2,
+                "timezone_offset": 8
+            }) if base_profile else {
+                "birthday": "0101",
+                "light_threshold": 56000,
+                "image_interval_min": 2,
+                "timezone_offset": 8
+            },
+            "chime": base_profile.get("chime", {
+                "enabled": True,
+                "interval": "hourly",
+                "pitch": 880,
+                "volume": 80
+            }) if base_profile else {
+                "enabled": True,
+                "interval": "hourly",
+                "pitch": 880,
+                "volume": 80
+            }
+        }
+
+        try:
+            config_manager.add_profile(new_profile)
+            cl.send(("HTTP/1.0 302 Found\r\nLocation: /edit_profile?name=" + new_name + "\r\n\r\n").encode())
+        except ValueError:
+            cl.send(b"HTTP/1.0 400 Bad Request\r\n\r\nProfile name already exists")
+        cl.close()
+        return
+
+    if "GET /delete_profile?" in request:
+        params = _get_query_params(request)
+        if not verify_csrf_token(params):
+            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+            cl.close()
+            return
+
+        try:
+            config_manager.delete_profile(params.get("name", ""))
+            cl.send(b"HTTP/1.0 302 Found\r\nLocation: /\r\n\r\n")
+        except ValueError as e:
+            cl.send(("HTTP/1.0 400 Bad Request\r\n\r\n" + str(e)).encode())
+        cl.close()
+        return
+
+    if "GET /factory_reset" in request:
+        params = _get_query_params(request)
+        if not verify_csrf_token(params):
+            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+            cl.close()
+            return
+
+        try:
+            factory_reset()
+            cl.send(HTML_RESET_PAGE)
+            cl.close()
+            update_display_Restart()
+            time.sleep(5)
+            machine.reset()
+        except Exception as e:
+            cl.send(HTML_RESET_ERROR_PREFIX)
+            cl.send(str(e).encode('utf-8'))
+            cl.send(HTML_RESET_ERROR_SUFFIX)
+            cl.close()
+        return
+
+    if "GET /save_profile?" in request:
+        params = _get_query_params(request)
+        if not verify_csrf_token(params):
+            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+            cl.close()
+            return
+
+        try:
+            _save_settings_from_params(params)
+            cl.send(HTML_SUCCESS_PAGE)
+            cl.close()
+            update_display_Restart()
+            time.sleep(5)
+            machine.reset()
+        except Exception as e:
+            print(f"Error: Failed to save profile. {e}")
+            cl.send(HTML_ERROR_PAGE_PREFIX)
+            cl.send(str(e).encode('utf-8'))
+            cl.send(HTML_ERROR_PAGE_SUFFIX)
+            cl.close()
+        return
+
+    try:
+        send_html_page(cl, _get_page_networks(require_auth))
+    except Exception as e:
+        print(f"Error: Failed to send page. {e}")
+    cl.close()
+
+class LanConfigServer:
+    def __init__(self):
+        addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
+        self.socket = socket.socket()
+        self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        self.socket.bind(addr)
+        self.socket.listen(1)
+        self.socket.settimeout(0)
+        print(f"LAN web server listening on {addr}")
+
+    def poll(self):
+        cl = None
+        had_client = False
+        try:
+            cl, addr = self.socket.accept()
+            had_client = True
+            print(f"Info: LAN client connected from {addr}.")
+            cl.settimeout(5.0)
+            request = _read_http_request(cl)
+            handle_config_request(cl, request, require_auth=True)
+        except OSError:
+            if cl:
+                try:
+                    cl.close()
+                except:
+                    pass
+        except Exception as e:
+            print(f"Error: LAN server error. {e}")
+            if cl:
+                try:
+                    cl.close()
+                except:
+                    pass
+        finally:
+            if had_client:
+                gc.collect()
+
+    def close(self):
+        try:
+            self.socket.close()
+        except:
+            pass
+
+def create_lan_config_server():
+    try:
+        return LanConfigServer()
+    except Exception as e:
+        print(f"Error: Failed to start LAN web server. {e}")
+        gc.collect()
+        return None
 
 def run_web_server():
     """Runs a simple web server to handle configuration requests with multi-profile support."""
@@ -400,7 +724,7 @@ def run_web_server():
             try:
                 cl_file = cl.makefile("rwb", 0)
                 request = ""
-                max_request_size = 2048  # 2KB limit to prevent memory exhaustion
+                max_request_size = 4096  # 4KB limit for longer global setting URLs
 
                 while True:
                     try:
@@ -680,6 +1004,13 @@ def run_web_server():
                         ap_password_input = params.get("ap_mode_password", "")
                         if ap_password_input:
                             config_manager.set_global("ap_mode.password", ap_password_input)
+
+                        config_manager.set_global("discord_webhook_url", params.get("discord_webhook_url", ""))
+                        lan_admin_username = params.get("lan_admin_username", "admin") or "admin"
+                        config_manager.set_global("lan_admin.username", lan_admin_username)
+                        lan_admin_password = params.get("lan_admin_password", "")
+                        if lan_admin_password:
+                            config_manager.set_global("lan_admin.password", lan_admin_password)
 
                         # Set as active profile and update last connected
                         # This ensures the device will prioritize this profile on next restart

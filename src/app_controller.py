@@ -10,7 +10,7 @@ from chime import Chime
 
 class AppController:
     """Manages the application's main logic, including hardware interaction, display updates, and data fetching."""
-    def __init__(self, state, hardware):
+    def __init__(self, state, hardware, lan_server=None):
         """Initializes the AppController.
 
         Args:
@@ -19,6 +19,7 @@ class AppController:
         """
         self.state = state
         self.hw = hardware
+        self.lan_server = lan_server
         self.chime = Chime(20) if config_manager.get('chime.enabled') else None
         self.location = config_manager.get("weather.location", "Taipei")
         self.api_key = config_manager.get("weather.api_key")
@@ -47,6 +48,9 @@ class AppController:
 
     def run_main_loop(self):
         """Executes the main application loop, handling sensor readings, time updates, and display logic."""
+        if self.lan_server:
+            self.lan_server.poll()
+
         adc_value = self.hw.get_adc_value()
         touch_state = self.hw.get_touch_state()
         t = get_local_time(offset=self.time_zone_offset*3600)
