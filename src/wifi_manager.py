@@ -10,6 +10,7 @@ from display_manager import update_display_Restart, update_display_AP
 from config_manager import config_manager
 from chime import Chime
 from hardware_manager import HardwareManager
+from presence_manager import get_presence_manager
 
 # Phase 3: CSRF 防護 - 全域 Token (啟動時生成)
 # 使用時間戳 + ADC 噪音生成隨機 token (MicroPython 相容)
@@ -307,6 +308,7 @@ def send_html_page(cl, networks, current_profile=None):
     # Phase 3: CSRF Token (隱藏欄位)
     send_chunk(cl, f'<input type="hidden" name="csrf_token" value="{CSRF_TOKEN}">'.encode('utf-8'))
     send_chunk(cl, f'<input type="hidden" id="original_profile_name" name="original_profile_name" value="{html_escape(profile_name)}">'.encode('utf-8'))
+    send_chunk(cl, b'<div class="button-group"><button type="button" class="btn btn-primary" onclick="window.location.href=\'/dashboard\'">&#26700;&#21069;&#29376;&#24907;&#20736;&#34920;&#26495;</button></div>')
     send_chunk(cl, f'<fieldset><legend>設定檔資訊</legend><div class="form-group"><label for="profile_name">設定檔名稱:</label><input id="profile_name" name="profile_name" value="{html_escape(profile_name)}" required></div></fieldset>'.encode('utf-8'))
 
     # WiFi section
@@ -386,6 +388,46 @@ def _get_page_networks(require_auth=False):
     ssid = active_profile.get("wifi", {}).get("ssid", "") if active_profile else ""
     return [{"ssid": ssid, "rssi": 0}] if ssid else []
 
+
+def _send_json(cl, value):
+    cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
+    cl.send(ujson.dumps(value).encode())
+
+
+def _send_presence_lines(cl, kind):
+    manager = get_presence_manager()
+    cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n[")
+    if manager:
+        lines = manager.get_daily() if kind == "daily" else manager.get_events()
+        first = True
+        for line in lines:
+            parts = line.split(",")
+            if kind == "daily" and len(parts) >= 3:
+                item = {"d": parts[0], "sec": int(parts[1]), "n": int(parts[2])}
+            elif kind == "events" and len(parts) >= 4:
+                item = {"d": parts[0], "t": parts[1], "s": int(parts[2]), "a": int(parts[3])}
+            else:
+                continue
+            if not first:
+                cl.send(b",")
+            cl.send(ujson.dumps(item).encode())
+            first = False
+    cl.send(b"]")
+
+
+def _send_presence_dashboard(cl):
+    send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n")
+    send_chunk(cl, b"""<!doctype html><html lang="zh-TW"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>&#26700;&#21069;&#29376;&#24907;</title><style>
+:root{--primary:#0288d1;--primary-dark:#0277bd;--primary-light:#4fc3f7;--danger:#d32f2f;--danger-dark:#c62828;--warning:#f57c00;--warning-dark:#e65100;--success:#388e3c;--bg:#f4f7f6;--card:#fff;--sidebar-bg:#fff;--text:#333;--text-light:#666;--border:#ddd;--shadow:rgba(2,136,209,0.15)}*{box-sizing:border-box}body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}.profile-selector{background:var(--sidebar-bg);border-bottom:2px solid var(--primary);padding:1rem}.profile-selector h2{color:var(--primary);font-size:1.2rem;margin:0;text-align:center}.main-content{flex:1;padding:1rem;overflow-y:auto}.container{max-width:700px;margin:auto;background:var(--card);padding:1.25rem;border-radius:12px;box-shadow:0 4px 20px var(--shadow)}h1{text-align:center;color:var(--primary);margin-bottom:1.25rem;font-size:1.75rem}fieldset{border:2px solid var(--primary);border-radius:8px;padding:1rem;margin-bottom:1rem;background:#f9feff}legend{font-weight:600;padding:0 .5rem;color:var(--primary)}.info{font-size:.85rem;color:var(--text-light);margin-top:.75rem;padding:.5rem;background:#e3f2fd;border-radius:4px;border-left:3px solid var(--primary)}.btn{width:100%;padding:.8rem;font-size:1rem;font-weight:bold;border:none;border-radius:6px;cursor:pointer;transition:all .2s;margin-top:.5rem;text-decoration:none;text-align:center;display:block}.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover{background:var(--primary-dark);transform:translateY(-1px)}.button-group{display:flex;gap:.5rem;margin-top:1rem;margin-bottom:1rem;flex-wrap:wrap}.button-group .btn{flex:1;min-width:140px}.metric-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:.75rem}.metric{background:var(--card);border:1px solid var(--border);border-radius:6px;padding:.75rem;min-height:76px}.metric label{display:block;font-weight:500;margin-bottom:.35rem;color:var(--text-light);font-size:.85rem}.metric span{display:block;font-size:1.45rem;font-weight:700;color:var(--primary)}.state-on span{color:var(--success)}.state-off span{color:var(--danger)}canvas{width:100%;height:220px;background:var(--card);border:1px solid var(--border);border-radius:6px;margin-top:.5rem}table{width:100%;border-collapse:collapse;background:var(--card);font-size:.9rem}th,td{padding:.55rem;border-bottom:1px solid var(--border);text-align:left}th{color:var(--primary);font-size:.8rem}.table-wrap{overflow-x:auto}@media(min-width:768px){.profile-selector{padding:1.5rem}.profile-selector h2{font-size:1.3rem}.main-content{padding:1.5rem}.container{padding:1.5rem}h1{font-size:2rem}.metric-grid{grid-template-columns:repeat(4,1fr)}}
+</style></head><body><div class="profile-selector"><h2>Pi Clock LAN Admin</h2></div><div class="main-content"><div class="container"><h1>&#26700;&#21069;&#29376;&#24907;</h1><div class="button-group"><a class="btn btn-primary" href="/">&#22238;&#21040;&#35373;&#23450;</a></div><fieldset><legend>&#30446;&#21069;&#29376;&#24907;</legend><div class="metric-grid"><div class="metric" id="stateBox"><label>&#29376;&#24907;</label><span id="state">--</span></div><div class="metric"><label>&#20170;&#26085;&#32047;&#35336;</label><span id="today">--</span></div><div class="metric"><label>&#30446;&#21069;&#21312;&#27573;</label><span id="session">--</span></div><div class="metric"><label>ADC / &#38272;&#27323;</label><span id="adc">--</span></div></div><p class="info">ADC &#23567;&#26044;&#25110;&#31561;&#26044;&#30446;&#21069;&#35373;&#23450;&#27284;&#30340;&#20809;&#24863;&#33256;&#30028;&#20540;&#26178;&#65292;&#26371;&#35336;&#28858;&#22312;&#26360;&#26700;&#21069;&#12290;</p></fieldset><fieldset><legend>&#36817; 30 &#22825;&#22294;&#34920;</legend><canvas id="chart" width="900" height="240"></canvas></fieldset><fieldset><legend>&#27599;&#26085;&#32113;&#35336;</legend><div class="table-wrap"><table><thead><tr><th>&#26085;&#26399;</th><th>&#22312;&#26700;&#21069;</th><th>&#20999;&#25563;&#27425;&#25976;</th></tr></thead><tbody id="daily"></tbody></table></div></fieldset><fieldset><legend>&#26368;&#36817;&#20999;&#25563;</legend><div class="table-wrap"><table><thead><tr><th>&#26178;&#38291;</th><th>&#29376;&#24907;</th><th>ADC</th></tr></thead><tbody id="events"></tbody></table></div></fieldset></div></div><script>
+function fmt(s){s=Math.max(0,Number(s)||0);const h=Math.floor(s/3600),m=Math.floor((s%3600)/60);return h+'h '+m+'m'}
+function dateText(d){return d.slice(0,4)+'-'+d.slice(4,6)+'-'+d.slice(6,8)}
+function timeText(t){return t.slice(0,2)+':'+t.slice(2,4)+':'+t.slice(4,6)}
+async function load(){const st=await fetch('/presence/status').then(r=>r.json());const ev=await fetch('/presence/events').then(r=>r.json());const da=await fetch('/presence/daily').then(r=>r.json());document.getElementById('state').textContent=st.state?'\\u5728\\u684c\\u524d':'\\u96e2\\u958b';document.getElementById('stateBox').className='metric '+(st.state?'state-on':'state-off');document.getElementById('today').textContent=fmt(st.today_seconds);document.getElementById('session').textContent=fmt(st.session_seconds);document.getElementById('adc').textContent=st.adc+' / '+st.threshold;document.getElementById('daily').innerHTML=da.slice(-30).reverse().map(x=>'<tr><td>'+dateText(x.d)+'</td><td>'+fmt(x.sec)+'</td><td>'+x.n+'</td></tr>').join('');document.getElementById('events').innerHTML=ev.slice(-40).reverse().map(x=>'<tr><td>'+dateText(x.d)+' '+timeText(x.t)+'</td><td>'+(x.s?'\\u5728\\u684c\\u524d':'\\u96e2\\u958b')+'</td><td>'+x.a+'</td></tr>').join('');draw(da)}
+function draw(rows){const c=document.getElementById('chart'),g=c.getContext('2d'),w=c.width,h=c.height;g.clearRect(0,0,w,h);g.fillStyle='#fff';g.fillRect(0,0,w,h);g.strokeStyle='#ddd';g.beginPath();g.moveTo(40,20);g.lineTo(40,h-34);g.lineTo(w-12,h-34);g.stroke();rows=rows.slice(-30);const bw=(w-64)/Math.max(1,rows.length);rows.forEach((r,i)=>{const bh=Math.round((h-62)*Math.min(1,r.sec/86400));g.fillStyle='#0288d1';g.fillRect(46+i*bw,h-35-bh,Math.max(3,bw-4),bh)});g.fillStyle='#666';g.font='14px sans-serif';g.fillText('\\u6700\\u8fd1 30 \\u5929',46,18)}
+load();setInterval(load,30000);
+</script></body></html>""")
+
 def _save_settings_from_params(params):
     original_name = params.get("original_profile_name", "")
     new_name = params.get("profile_name", "")
@@ -452,6 +494,28 @@ def handle_config_request(cl, request, require_auth=False):
 
     if "GET /favicon.ico" in request:
         cl.send(b"HTTP/1.0 404 Not Found\r\n\r\n")
+        cl.close()
+        return
+
+    if "GET /dashboard" in request:
+        _send_presence_dashboard(cl)
+        cl.close()
+        return
+
+    if "GET /presence/status" in request:
+        manager = get_presence_manager()
+        status = manager.get_status() if manager else {"state": 0, "adc": -1, "threshold": -1, "session_seconds": 0, "today_seconds": 0, "last_change_date": "", "last_change_time": "", "transitions": 0}
+        _send_json(cl, status)
+        cl.close()
+        return
+
+    if "GET /presence/events" in request:
+        _send_presence_lines(cl, "events")
+        cl.close()
+        return
+
+    if "GET /presence/daily" in request:
+        _send_presence_lines(cl, "daily")
         cl.close()
         return
 

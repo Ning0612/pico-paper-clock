@@ -7,6 +7,8 @@ from display_manager import update_page_weather, update_page_time_image, update_
 from file_manager import get_image_path, get_date_event_images, shuffle_files
 from wifi_manager import reset_wifi_and_reboot
 from chime import Chime
+from discord_notifier import send_presence_summary
+from presence_manager import PresenceManager, set_presence_manager
 
 class AppController:
     """Manages the application's main logic, including hardware interaction, display updates, and data fetching."""
@@ -24,6 +26,8 @@ class AppController:
         self.location = config_manager.get("weather.location", "Taipei")
         self.api_key = config_manager.get("weather.api_key")
         self.time_zone_offset = config_manager.get("user.timezone_offset", 8)
+        self.presence = PresenceManager(discord_sender=send_presence_summary)
+        set_presence_manager(self.presence)
 
 
     def handle_touch(self, touch_state):
@@ -61,6 +65,7 @@ class AppController:
         self.handle_buttons()
 
         light_threshold = config_manager.get("user.light_threshold", 55000)
+        self.presence.update(adc_value, light_threshold, t)
         time_since_touch = time.time() - self.state.last_touch_time if self.state.last_touch_time != -1 else 3601
 
         # If ambient light is below threshold (screen should be off) or time since last touch is less than 1 hour
