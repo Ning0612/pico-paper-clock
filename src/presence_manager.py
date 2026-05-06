@@ -45,6 +45,16 @@ def _read_lines(path):
     except OSError:
         return []
 
+def iter_lines(path):
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    yield line
+    except OSError:
+        return
+
 
 def _write_lines(path, lines):
     tmp_path = path + ".tmp"
@@ -66,14 +76,30 @@ def _append_line(path, line):
 
 
 def _trim_by_date(path, min_date):
-    lines = _read_lines(path)
-    kept = []
-    for line in lines:
-        parts = line.split(",", 1)
-        if parts and parts[0] >= min_date:
-            kept.append(line)
-    if len(kept) != len(lines):
-        _write_lines(path, kept)
+    tmp_path = path + ".tmp"
+    changed = False
+    try:
+        with open(tmp_path, "w") as out:
+            for line in iter_lines(path):
+                parts = line.split(",", 1)
+                if parts and parts[0] >= min_date:
+                    out.write(line)
+                    out.write("\n")
+                else:
+                    changed = True
+        if changed:
+            try:
+                os.remove(path)
+            except OSError:
+                pass
+            os.rename(tmp_path, path)
+        else:
+            os.remove(tmp_path)
+    except OSError:
+        try:
+            os.remove(tmp_path)
+        except OSError:
+            pass
 
 
 class PresenceManager:
@@ -169,7 +195,7 @@ class PresenceManager:
         last_epoch = None
         last_time = ""
 
-        for line in _read_lines(EVENT_FILE):
+        for line in iter_lines(EVENT_FILE):
             parts = line.split(",")
             if len(parts) < 4 or parts[0] != date:
                 continue

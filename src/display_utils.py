@@ -73,6 +73,10 @@ def rotate_buffer(src, src_width, src_height, angle):
 
 def draw_scaled_text(canvas, text, x, y, scale, color=0):
     """Draws scaled text on the canvas."""
+    if scale == 1:
+        canvas.text(text, x, y, color)
+        return
+
     orig_char_width = 8
     orig_char_height = 8
     orig_width = len(text) * orig_char_width
@@ -107,23 +111,24 @@ def draw_scaled_text(canvas, text, x, y, scale, color=0):
 
 def draw_image(canvas, image_path, src_width, src_height, x, y):
     """Draws an image from a binary file onto the canvas."""
-    img_data = None
+    img_buf = None
     img_fb = None
     try:
-        with open(image_path, "rb") as f:
-            img_data = f.read()
         expected_length = (src_width * src_height) // 8
-        if len(img_data) != expected_length:
-            print(f"Error: Image data length mismatch for {image_path}. Expected {expected_length}, got {len(img_data)}.")
+        img_buf = bytearray(expected_length)
+        with open(image_path, "rb") as f:
+            bytes_read = f.readinto(img_buf)
+        if bytes_read != expected_length:
+            print(f"Error: Image data length mismatch for {image_path}. Expected {expected_length}, got {bytes_read}.")
             return
-        img_fb = framebuf.FrameBuffer(bytearray(img_data), src_width, src_height, framebuf.MONO_HLSB)
+        img_fb = framebuf.FrameBuffer(img_buf, src_width, src_height, framebuf.MONO_HLSB)
         canvas.blit(img_fb, x, y)
     except OSError as e:
         print(f"Error: Could not read image file {image_path}. Details: {e}")
     except Exception as e:
         print(f"Error: An unexpected error occurred while processing {image_path}. Details: {e}")
     finally:
-        img_data = None
+        img_buf = None
         img_fb = None
         gc.collect()
 

@@ -204,10 +204,10 @@ class EPD_2in9:
         self.lut = WF_PARTIAL_2IN9
         self.lut_l = WF_PARTIAL_2IN9_Wait
 
-        self.buffer_4Gray = bytearray(self.height * self.width // 4)
-        self.image4Gray = framebuf.FrameBuffer(self.buffer_4Gray, self.width, self.height, framebuf.GS2_HMSB)
-        self.buffer = bytearray(self.height * self.width // 8)
-        self.image1Gray_Portrait = framebuf.FrameBuffer(self.buffer, self.width, self.height, framebuf.MONO_HLSB)
+        self.buffer_4Gray = None
+        self.image4Gray = None
+        self.buffer = None
+        self.image1Gray_Portrait = None
         
 
     # Hardware reset
@@ -651,4 +651,3 @@ if __name__ == "__main__":
         
         if state is not None:
             print("觸控狀態：", state)
-            

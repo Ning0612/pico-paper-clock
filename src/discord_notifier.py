@@ -1,9 +1,14 @@
 import gc
 import network
-import ujson
 import urequests
 
 from config_manager import config_manager
+
+JSON_HEADERS = {"Content-Type": "application/json"}
+
+def _discord_payload(message):
+    message = message.replace("\\", "\\\\").replace('"', '\\"')
+    return '{"content":"%s"}' % message
 
 
 def send_lan_ip(ip_address):
@@ -20,9 +25,8 @@ def send_lan_ip(ip_address):
     response = None
     try:
         message = "Pi Paper Clock connected: http://{}/".format(ip_address)
-        payload = ujson.dumps({"content": message})
-        headers = {"Content-Type": "application/json"}
-        response = urequests.post(webhook_url, data=payload, headers=headers, timeout=10)
+        payload = _discord_payload(message)
+        response = urequests.post(webhook_url, data=payload, headers=JSON_HEADERS, timeout=10)
         if response.status_code in (200, 204):
             print("Success: Discord LAN IP notification sent.")
             return True
@@ -73,9 +77,8 @@ def send_presence_summary(summary_line):
         message = "Desk presence for {}: {}h {}m at desk, {} state changes.".format(
             display_date, hours, minutes, transitions
         )
-        payload = ujson.dumps({"content": message})
-        headers = {"Content-Type": "application/json"}
-        response = urequests.post(webhook_url, data=payload, headers=headers, timeout=10)
+        payload = _discord_payload(message)
+        response = urequests.post(webhook_url, data=payload, headers=JSON_HEADERS, timeout=10)
         if response.status_code in (200, 204):
             print("Success: Discord presence summary sent.")
             return True

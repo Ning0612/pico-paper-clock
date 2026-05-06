@@ -10,7 +10,7 @@ from display_manager import update_display_Restart, update_display_AP
 from config_manager import config_manager
 from chime import Chime
 from hardware_manager import HardwareManager
-from presence_manager import get_presence_manager
+from presence_manager import get_presence_manager, iter_lines
 
 # Phase 3: CSRF 防護 - 全域 Token (啟動時生成)
 # 使用時間戳 + ADC 噪音生成隨機 token (MicroPython 相容)
@@ -154,26 +154,16 @@ def scan_networks():
     sta = network.WLAN(network.STA_IF)
     sta.active(True)
     nets = sta.scan()
-    networks = []
+    unique_networks = {}
     for ssid_bytes, bssid, channel, rssi, authmode, hidden in nets:
         try:
             ssid = ssid_bytes.decode('utf-8')
-            if ssid:
-                networks.append({
-                    'ssid': ssid,
-                    'rssi': rssi  # Signal strength (higher is better, usually negative values)
-                })
+            if ssid and (ssid not in unique_networks or rssi > unique_networks[ssid]):
+                unique_networks[ssid] = rssi
         except UnicodeError:
             pass
 
-    # Remove duplicates and keep the one with strongest signal
-    unique_networks = {}
-    for net in networks:
-        ssid = net['ssid']
-        if ssid not in unique_networks or net['rssi'] > unique_networks[ssid]['rssi']:
-            unique_networks[ssid] = net
-
-    return list(unique_networks.values())
+    return [{"ssid": ssid, "rssi": rssi} for ssid, rssi in unique_networks.items()]
 
 # Compressed static HTML chunks for memory efficiency with improved UI/UX
 HTML_HEADER = b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<!DOCTYPE html><html lang=\"zh-TW\"><head><meta charset=\"UTF-8\"><meta name=\"viewport\" content=\"width=device-width,initial-scale=1.0\"><title>Pi Clock</title><style>:root{--primary:#0288d1;--primary-dark:#0277bd;--primary-light:#4fc3f7;--danger:#d32f2f;--danger-dark:#c62828;--warning:#f57c00;--warning-dark:#e65100;--success:#388e3c;--bg:#f4f7f6;--card:#fff;--sidebar-bg:#fff;--text:#333;--text-light:#666;--border:#ddd;--shadow:rgba(2,136,209,0.15)}*{box-sizing:border-box}body{margin:0;padding:0;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:var(--bg);color:var(--text);min-height:100vh}.profile-selector{background:var(--sidebar-bg);border-bottom:2px solid var(--primary);padding:1rem}.profile-selector h2{color:var(--primary);font-size:1.2rem;margin:0 0 0.75rem 0}.profile-select-group{display:flex;gap:0.5rem;align-items:center;max-width:500px;margin:0 auto}.profile-select-group select{flex:1;padding:0.7rem;border:1px solid var(--primary);border-radius:6px;font-size:1rem;background:var(--card);color:var(--text);font-weight:500;cursor:pointer}.profile-select-group select:focus{border-color:var(--primary-dark);outline:none;box-shadow:0 0 0 2px rgba(2,136,209,0.2)}.profile-select-group .btn{flex:0 0 auto;width:auto;min-width:auto;margin:0;padding:0.4rem 0.6rem;font-size:0.85rem;line-height:1.2}.main-content{flex:1;padding:1rem;overflow-y:auto}.container{max-width:700px;margin:auto;background:var(--card);padding:1.25rem;border-radius:12px;box-shadow:0 4px 20px var(--shadow)}h1{text-align:center;color:var(--primary);margin-bottom:1.25rem;font-size:1.75rem}fieldset{border:2px solid var(--primary);border-radius:8px;padding:1rem;margin-bottom:1rem;background:#f9feff}legend{font-weight:600;padding:0 .5rem;color:var(--primary)}label{display:block;font-weight:500;margin-bottom:.4rem;color:var(--text);font-size:0.95rem}input,select{width:100%;padding:0.7rem;border:1px solid var(--border);border-radius:6px;font-size:1rem;background:var(--card);transition:border .2s}input:focus,select:focus{border-color:var(--primary);outline:none;box-shadow:0 0 0 2px rgba(2,136,209,0.2)}input[type='checkbox']{width:auto;margin-right:.5rem;transform:scale(1.2);accent-color:var(--primary)}.form-group{margin-bottom:1rem}.info{font-size:.85rem;color:var(--text-light);margin-top:.25rem;padding:0.5rem;background:#e3f2fd;border-radius:4px;border-left:3px solid var(--primary)}.btn{width:100%;padding:0.8rem;font-size:1rem;font-weight:bold;border:none;border-radius:6px;cursor:pointer;transition:all .2s;margin-top:0.5rem}.btn:disabled{opacity:0.6;cursor:not-allowed}.btn-primary{background:var(--primary);color:#fff}.btn-primary:hover:not(:disabled){background:var(--primary-dark);transform:translateY(-1px)}.btn-primary:active{transform:translateY(0)}.btn-danger{background:var(--danger);color:#fff}.btn-danger:hover:not(:disabled){background:var(--danger-dark)}.btn-warning{background:var(--warning);color:#fff}.btn-warning:hover:not(:disabled){background:var(--warning-dark)}.adc-value{font-weight:bold;color:var(--primary)}.button-group{display:flex;gap:0.5rem;margin-top:1rem;flex-wrap:wrap}.button-group .btn{flex:1;min-width:140px}.danger-zone{margin-top:2rem;border-color:var(--danger)!important;background:#fff5f5!important}.danger-zone legend{color:var(--danger)!important}@media (min-width:768px){.profile-selector{padding:1.5rem}.profile-selector h2{font-size:1.3rem;margin-bottom:1rem}.main-content{padding:1.5rem}.container{padding:1.5rem}h1{font-size:2rem}.button-group .btn{min-width:auto}}</style></head><body><div class=\"profile-selector\"><h2>設定檔管理</h2><div class=\"profile-select-group\">"
@@ -222,10 +212,15 @@ def send_chunk(cl, data):
     可靠地分段傳送資料，並加入微小延遲以防止緩衝區溢位。
     解決頁面載入不全或傳送失敗的問題。
     """
+    if isinstance(data, str):
+        data = data.encode('utf-8')
+
     total_sent = 0
+    chunk_size = 512
     while total_sent < len(data):
         try:
-            sent = cl.send(data[total_sent:])
+            chunk_end = min(total_sent + chunk_size, len(data))
+            sent = cl.send(data[total_sent:chunk_end])
             if sent == 0:
                 raise OSError("Socket connection broken")
             total_sent += sent
@@ -343,22 +338,24 @@ def send_html_page(cl, networks, current_profile=None):
 
 def _read_http_request(cl, max_request_size=4096):
     cl_file = cl.makefile("rwb", 0)
-    request = ""
+    request_lines = []
+    request_size = 0
 
     while True:
         try:
             line = cl_file.readline()
             if not line or line == b"\r\n":
                 break
-            if len(request) + len(line) > max_request_size:
+            request_size += len(line)
+            if request_size > max_request_size:
                 print("Warning: Request too large, rejecting.")
                 cl.send(b"HTTP/1.0 413 Request Entity Too Large\r\n\r\n")
                 return None
-            request += line.decode()
+            request_lines.append(line.decode())
         except OSError:
             break
 
-    return request
+    return "".join(request_lines)
 
 def _get_query_params(request):
     if "?" not in request:
@@ -413,19 +410,21 @@ def _send_presence_lines(cl, kind):
     manager = get_presence_manager()
     cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n[")
     if manager:
-        lines = manager.get_daily() if kind == "daily" else manager.get_events()
+        path = "presence_daily.log" if kind == "daily" else "presence_events.log"
         first = True
-        for line in lines:
+        for line in iter_lines(path):
             parts = line.split(",")
             if kind == "daily" and len(parts) >= 3:
-                item = {"d": parts[0], "sec": int(parts[1]), "n": int(parts[2])}
+                item = '{{"d":"{}","sec":{},"n":{}}}'.format(parts[0], int(parts[1]), int(parts[2]))
             elif kind == "events" and len(parts) >= 4:
-                item = {"d": parts[0], "t": parts[1], "s": int(parts[2]), "a": int(parts[3]), "e": _presence_epoch(parts[0], parts[1])}
+                item = '{{"d":"{}","t":"{}","s":{},"a":{},"e":{}}}'.format(
+                    parts[0], parts[1], int(parts[2]), int(parts[3]), _presence_epoch(parts[0], parts[1])
+                )
             else:
                 continue
             if not first:
                 cl.send(b",")
-            cl.send(ujson.dumps(item).encode())
+            cl.send(item.encode())
             first = False
     cl.send(b"]")
 

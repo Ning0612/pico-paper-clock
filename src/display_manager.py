@@ -20,9 +20,12 @@ def update_page_weather(current_weather, weather_forecast, display_image_path, p
     def draw(canvas):
         date_str = "{:02d}/{:02d}".format(t[1], t[2])
         time_str = "{:02d}:{:02d}".format(t[3], t[4])
-        
-        if weather_forecast[0][0][-2:] != "{:02d}".format(t[2]):
-            weather_forecast.insert(0, ("{:02d}-{:02d}".format(t[1], t[2]), current_weather[0], current_weather[1], -1))
+        today_date = "{:02d}-{:02d}".format(t[1], t[2])
+        forecast_start = 0
+        current_rain_prob = -1
+        if weather_forecast and weather_forecast[0][0] == today_date:
+            forecast_start = 1
+            current_rain_prob = weather_forecast[0][3]
             
         draw_scaled_text(canvas, date_str, 3, 10, 3, 0)
         draw_scaled_text(canvas, time_str, 3, 40, 3, 0)
@@ -49,12 +52,13 @@ def update_page_weather(current_weather, weather_forecast, display_image_path, p
                 draw_scaled_text(canvas, "{:02d}".format(int(current_weather[0])), 15 + offset, 72, 1, 0)
                 draw_scaled_text(canvas, "o", 30 + offset, 67, 1, 0)
                 # Show current rain probability if available
-                if weather_forecast[0][3] >= 0:
-                    draw_scaled_text(canvas, "{}%".format(int(weather_forecast[0][3])), 15 + offset, 115, 1, 0)
+                if current_rain_prob >= 0:
+                    draw_scaled_text(canvas, "{}%".format(int(current_rain_prob)), 15 + offset, 115, 1, 0)
                 offset += 40
             
             # Next 3 slots: Future 3-day forecast (skip first day, show next 3)
-            for weather in weather_forecast[1:4]:
+            for i in range(forecast_start, min(len(weather_forecast), forecast_start + 3)):
+                weather = weather_forecast[i]
                 icon_path = "/image/weather_icons/{}.bin".format(weather[2])
                 draw_image(canvas, icon_path, 32, 32, 8 + offset, 80)
                 draw_scaled_text(canvas, "{:02d}".format(int(weather[1])), 15 + offset, 72, 1, 0)
