@@ -120,10 +120,16 @@ class PresenceManager:
 
     def get_status(self):
         session_seconds = 0
+        segment_seconds = 0
+        now_epoch = self.last_update_epoch if self.last_update_epoch is not None else self.last_change_epoch
+        if self.last_change_epoch is not None and now_epoch is not None:
+            try:
+                segment_seconds = max(0, int(now_epoch - self.last_change_epoch))
+            except Exception:
+                segment_seconds = 0
         if self.current_state and self.last_change_epoch is not None:
             try:
-                now_epoch = self.last_update_epoch if self.last_update_epoch is not None else self.last_change_epoch
-                session_seconds = max(0, int(now_epoch - self.last_change_epoch))
+                session_seconds = segment_seconds
             except Exception:
                 session_seconds = 0
         today_total = self.today_seconds + session_seconds
@@ -132,10 +138,12 @@ class PresenceManager:
             "adc": self.last_adc if self.last_adc is not None else -1,
             "threshold": self.last_threshold if self.last_threshold is not None else config_manager.get("user.light_threshold", 56000),
             "session_seconds": session_seconds,
+            "segment_seconds": segment_seconds,
             "today_seconds": today_total,
             "last_change_date": self.last_change_date,
             "last_change_time": self.last_change_time,
-            "transitions": self.today_transitions
+            "transitions": self.today_transitions,
+            "now_epoch": int(now_epoch) if now_epoch is not None else 0
         }
 
     def get_events(self):

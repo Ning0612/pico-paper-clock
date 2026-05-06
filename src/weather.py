@@ -74,7 +74,9 @@ def fetch_weather_forecast(api_key, location, days_limit=4, timezone_offset=8):
         return []
 
     print(f"Info: Fetching weather forecast for {location}.")
-    url = "https://api.openweathermap.org/data/2.5/forecast?q={0},TW&appid={1}&units=metric&cnt=40".format(location, api_key)
+    gc.collect()
+    forecast_count = min(24, max(8, days_limit * 6))
+    url = "https://api.openweathermap.org/data/2.5/forecast?q={0},TW&appid={1}&units=metric&cnt={2}".format(location, api_key, forecast_count)
     response = _make_request_with_retry(url)
 
     if not response:
