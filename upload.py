@@ -2,8 +2,6 @@ import subprocess
 import os
 import argparse
 import time 
-import sys
-import threading
 
 # --- Configuration ---
 SOURCE_DIR = "src"
@@ -15,77 +13,46 @@ ENABLE_RECURSIVE_CLEAN = False  # 新增：是否遞迴清除所有檔案
 NO_CONFIG = False  # 新增：是否跳過 config.json
 
 
-# 用於停止讀取執行緒的事件
-stop_reader_event = threading.Event()
-
-def _reader_thread(pipe, output_stream):
+def interactive_repl(base_cmd, retry_count=30, retry_delay=1.0, connected_exit_seconds=2.0):
     """
-    獨立執行緒，用於即時讀取子進程的輸出。
-    """
-    while not stop_reader_event.is_set():
-        try:
-            line = pipe.readline()
-            if line:
-                output_stream.write(line)
-                output_stream.flush()
-            else:
-                if pipe.closed:
-                    break
-                time.sleep(0.01)
-        except ValueError:
-            break
-        except Exception as e:
-            break
-
-def interactive_repl(base_cmd):
-    """
-    啟動 mpremote repl 並實現即時互動，直到使用者按下 Ctrl+X。
+    Start mpremote repl using the current terminal for stable live output.
     """
     _clear_current_line()
-    print("\n🖥️ 連接到裝置 Terminal (REPL)... 按 Ctrl+X 退出。")
-    
+    print("\nEntering device Terminal (REPL)... Press Ctrl+X to exit.")
+
     repl_command = base_cmd + ["repl"]
-    
-    process = subprocess.Popen(
-        repl_command,
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True, 
-        encoding='latin-1', 
-        errors='ignore'
-    )
+    connected = False
+    for attempt in range(1, retry_count + 1):
+        try:
+            started_at = time.monotonic()
+            return_code = subprocess.call(repl_command)
+            elapsed = time.monotonic() - started_at
+            if return_code == 0:
+                connected = True
+                break
+            if elapsed >= connected_exit_seconds:
+                print("REPL session ended with status {}.".format(return_code))
+                connected = True
+                break
+            if attempt < retry_count:
+                print("REPL connection failed, waiting for device in {}s ({}/{})...".format(
+                    retry_delay, attempt, retry_count
+                ))
+                time.sleep(retry_delay)
+        except FileNotFoundError:
+            print("mpremote not found. Install it with: pip install mpremote")
+            break
+        except KeyboardInterrupt:
+            print("\nExited REPL.")
+            connected = True
+            break
 
-    stdout_thread = threading.Thread(target=_reader_thread, args=(process.stdout, sys.stdout))
-    stderr_thread = threading.Thread(target=_reader_thread, args=(process.stderr, sys.stderr))
+    if connected:
+        print("REPL connection closed.")
+    else:
+        print("REPL connection failed.")
+    return connected
 
-    stdout_thread.start()
-    stderr_thread.start()
-
-    try:
-        process.wait()
-    except KeyboardInterrupt:
-        print("\n捕獲到 Ctrl+C，正在終止 REPL 進程...")
-    finally:
-        stop_reader_event.set()
-        stdout_thread.join(timeout=1)
-        stderr_thread.join(timeout=1)
-        
-        if process.stdout:
-            process.stdout.close()
-        if process.stderr:
-            process.stderr.close()
-        if process.stdin:
-            process.stdin.close()
-
-        if process.poll() is None:
-            process.terminate()
-            process.wait(timeout=1)
-            if process.poll() is None:
-                process.kill()
-        
-        print("REPL 連接已關閉。")
-        stop_reader_event.clear()
 
 def run_command(command, ignore_exists_error=False, display_output=False, capture_output_only=False):
     """
@@ -429,7 +396,7 @@ def upload_files():
         if not run_command(cmd, display_output=False):
             _clear_current_line()
             print(f"❌ 上傳失敗: {remote_path}")
-            return
+            return False
         
         uploaded_size += file_size
         
@@ -438,16 +405,13 @@ def upload_files():
 
     # 重啟裝置
     reset_device()
-
-    print("等待裝置重啟並初始化...")
-    time.sleep(5) 
-
-    # 進入互動式 REPL
-    print("\n現在您可以進入裝置 Terminal (REPL)... 按 Ctrl+X 退出。")
-    interactive_repl(base_cmd)
+    if not interactive_repl(base_cmd):
+        return False
+    return True
 
 def parse_args():
     parser = argparse.ArgumentParser(description="Upload files to Pico W.")
+    parser.add_argument("--port", default=None, help="mpremote serial port, e.g. COM7.")
     parser.add_argument("--no-images", action="store_false", dest="upload_images", default=True, help="Do not upload image files.")
     parser.add_argument("--recursive-clean", action="store_true", dest="recursive_clean", default=False, help="遞迴清除裝置上的所有檔案 (包含目錄)")
     parser.add_argument("--no-clean", action="store_false", dest="enable_clean", default=True, help="跳過清除檔案步驟")
@@ -461,10 +425,12 @@ if __name__ == "__main__":
     ENABLE_RECURSIVE_CLEAN = args.recursive_clean
     ENABLE_CLEAN = args.enable_clean
     NO_CONFIG = args.no_config
+    MPREMOTE_PORT = args.port
 
     print("--- Pico W 自動部署開始 ---")
 
     if ENABLE_CLEAN:
         clean_device()
 
-    upload_files()
+    if not upload_files():
+        raise SystemExit(1)
