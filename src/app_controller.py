@@ -1,5 +1,6 @@
 # app_controller.py
 import time
+import gc
 from config_manager import config_manager
 from netutils import sync_time, get_local_time
 from weather import fetch_current_weather, fetch_weather_forecast
@@ -7,12 +8,21 @@ from display_manager import update_page_weather, update_page_time_image, update_
 from file_manager import get_image_path, get_date_event_images, shuffle_files
 from wifi_manager import reset_wifi_and_reboot
 from chime import Chime
-from discord_notifier import send_presence_summary
+from discord_notifier import send_lan_ip, send_presence_session, send_presence_summary
 from presence_manager import PresenceManager, set_presence_manager
+
+STARTUP_DISCORD_DELAY_MS = 60 * 1000
+STARTUP_DISCORD_RETRY_MS = 5 * 60 * 1000
+CURRENT_WEATHER_REFRESH_MS = 3 * 60 * 1000
+CURRENT_WEATHER_RETRY_MS = 10 * 60 * 1000
+FORECAST_REFRESH_MS = 30 * 60 * 1000
+FORECAST_RETRY_MS = 10 * 60 * 1000
+CURRENT_WEATHER_MAX_AGE_MS = 30 * 60 * 1000
+FORECAST_MAX_AGE_MS = 4 * 60 * 60 * 1000
 
 class AppController:
     """Manages the application's main logic, including hardware interaction, display updates, and data fetching."""
-    def __init__(self, state, hardware, lan_server=None):
+    def __init__(self, state, hardware, lan_server=None, lan_ip=None):
         """Initializes the AppController.
 
         Args:
@@ -22,11 +32,20 @@ class AppController:
         self.state = state
         self.hw = hardware
         self.lan_server = lan_server
+        self.lan_ip = lan_ip
+        self.startup_discord_sent = False
+        self.startup_discord_disabled = False
+        self.startup_discord_attempted = False
+        self.startup_discord_ready_ms = time.ticks_add(time.ticks_ms(), STARTUP_DISCORD_DELAY_MS)
+        self.startup_discord_last_attempt_ms = time.ticks_add(time.ticks_ms(), -STARTUP_DISCORD_RETRY_MS)
         self.chime = Chime(20) if config_manager.get('chime.enabled') else None
         self.location = config_manager.get("weather.location", "Taipei")
         self.api_key = config_manager.get("weather.api_key")
         self.time_zone_offset = config_manager.get("user.timezone_offset", 8)
-        self.presence = PresenceManager(discord_sender=send_presence_summary)
+        self.presence = PresenceManager(
+            discord_sender=send_presence_summary,
+            session_sender=send_presence_session
+        )
         set_presence_manager(self.presence)
 
 
@@ -52,6 +71,7 @@ class AppController:
 
     def run_main_loop(self):
         """Executes the main application loop, handling sensor readings, time updates, and display logic."""
+        weather_used_network = False
         if self.lan_server:
             self.lan_server.poll()
 
@@ -81,7 +101,7 @@ class AppController:
             if t[4] != self.state.last_minute or touch_state is not None or self.state.is_first_run:
                 self.handle_touch(touch_state)
                 self._perform_chime(t)
-                self._update_weather()
+                weather_used_network = self._update_weather()
                 self._update_sensor_data()
                 self._update_display(t)
 
@@ -92,6 +112,42 @@ class AppController:
             # Reset flags when screen is off to ensure full update on wake-up
             self.state.is_first_run = True
             self.state.partial_update = False
+
+        if not weather_used_network:
+            if not self._send_startup_discord_if_ready():
+                if not self._startup_discord_pending():
+                    self.presence.flush_discord()
+        gc.collect()
+
+    def _send_startup_discord_if_ready(self):
+        if self.startup_discord_sent or self.startup_discord_disabled or not self.lan_ip:
+            return False
+        if not config_manager.get_global("discord_webhook_url", ""):
+            self.startup_discord_disabled = True
+            return False
+        if time.ticks_diff(time.ticks_ms(), self.startup_discord_ready_ms) < 0:
+            return False
+        if time.ticks_diff(time.ticks_ms(), self.startup_discord_last_attempt_ms) < STARTUP_DISCORD_RETRY_MS:
+            return False
+        print("Info: Sending delayed Discord LAN IP notification.")
+        self.startup_discord_last_attempt_ms = time.ticks_ms()
+        self.startup_discord_attempted = True
+        result = send_lan_ip(self.lan_ip)
+        if result is None:
+            print("Warning: Disabling LAN IP Discord notification after ENOMEM.")
+            self.startup_discord_disabled = True
+        else:
+            self.startup_discord_sent = result
+        return True
+
+    def _startup_discord_pending(self):
+        return (
+            bool(self.lan_ip) and
+            not self.startup_discord_attempted and
+            not self.startup_discord_sent and
+            not self.startup_discord_disabled and
+            bool(config_manager.get_global("discord_webhook_url", ""))
+        )
 
     def _update_display(self, t):
         """Updates the display content based on current state and time.
@@ -147,25 +203,60 @@ class AppController:
 
     def _update_weather(self):
         """Fetches and updates current weather and forecast data if needed."""
-        if time.ticks_diff(time.ticks_ms(), self.state.current_weather_last_updated) > 3 * 60 * 1000 or self.state.is_first_run or not self.state.current_weather:
-            current_weather = fetch_current_weather(self.api_key, self.location)
-            if current_weather:
-                self.state.current_weather = current_weather
-                self.state.current_weather_last_updated = time.ticks_ms()
-        
-        if time.ticks_diff(time.ticks_ms(), self.state.weather_forecast_last_updated) > 30 * 60 * 1000 or self.state.is_first_run or not self.state.weather_forecast:
-            weather_forecast = fetch_weather_forecast(self.api_key, self.location, days_limit=4, timezone_offset=self.time_zone_offset)
-            if weather_forecast:
-                self.state.weather_forecast = weather_forecast
-                self.state.weather_forecast_last_updated = time.ticks_ms()
+        try:
+            used_network = False
+            now_ms = time.ticks_ms()
 
-        # Clear current weather data if older than 30 minutes
-        if time.ticks_diff(time.ticks_ms(), self.state.current_weather_last_updated) > 30 * 60 * 1000:
-            self.state.current_weather = None
+            current_attempt_allowed = (
+                self.state.current_weather_last_attempted < 0 or
+                time.ticks_diff(now_ms, self.state.current_weather_last_attempted) > CURRENT_WEATHER_RETRY_MS
+            )
+            current_due = current_attempt_allowed and (
+                not self.state.current_weather or
+                time.ticks_diff(now_ms, self.state.current_weather_last_updated) > CURRENT_WEATHER_REFRESH_MS
+            )
+            if self.state.is_first_run and self.state.current_weather_last_attempted < 0:
+                current_due = True
 
-        # Clear weather forecast data if older than 4 hours
-        if time.ticks_diff(time.ticks_ms(), self.state.weather_forecast_last_updated) > 4 * 60 * 60 * 1000 :
-            self.state.weather_forecast = None
+            if current_due:
+                used_network = True
+                self.state.current_weather_last_attempted = now_ms
+                current_weather = fetch_current_weather(self.api_key, self.location)
+                if current_weather:
+                    self.state.current_weather = current_weather
+                    self.state.current_weather_last_updated = time.ticks_ms()
+
+            now_ms = time.ticks_ms()
+            forecast_attempt_allowed = (
+                self.state.weather_forecast_last_attempted < 0 or
+                time.ticks_diff(now_ms, self.state.weather_forecast_last_attempted) > FORECAST_RETRY_MS
+            )
+            forecast_due = forecast_attempt_allowed and (
+                not self.state.weather_forecast or
+                time.ticks_diff(now_ms, self.state.weather_forecast_last_updated) > FORECAST_REFRESH_MS
+            )
+            if self.state.is_first_run and self.state.weather_forecast_last_attempted < 0:
+                forecast_due = True
+
+            if forecast_due:
+                used_network = True
+                self.state.weather_forecast_last_attempted = now_ms
+                weather_forecast = fetch_weather_forecast(self.api_key, self.location, days_limit=4, timezone_offset=self.time_zone_offset)
+                if weather_forecast:
+                    self.state.weather_forecast = weather_forecast
+                    self.state.weather_forecast_last_updated = time.ticks_ms()
+
+            # Clear current weather data if older than 30 minutes
+            if time.ticks_diff(time.ticks_ms(), self.state.current_weather_last_updated) > CURRENT_WEATHER_MAX_AGE_MS:
+                self.state.current_weather = None
+
+            # Clear weather forecast data if older than 4 hours
+            if time.ticks_diff(time.ticks_ms(), self.state.weather_forecast_last_updated) > FORECAST_MAX_AGE_MS:
+                self.state.weather_forecast = None
+
+            return used_network
+        finally:
+            gc.collect()
     
     def _update_sensor_data(self):
         """Reads DHT22 sensor data and updates application state.

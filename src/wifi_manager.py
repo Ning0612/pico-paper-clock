@@ -215,20 +215,24 @@ def send_chunk(cl, data):
     if isinstance(data, str):
         data = data.encode('utf-8')
 
+    mv = memoryview(data)
     total_sent = 0
     chunk_size = 512
-    while total_sent < len(data):
-        try:
-            chunk_end = min(total_sent + chunk_size, len(data))
-            sent = cl.send(data[total_sent:chunk_end])
-            if sent == 0:
-                raise OSError("Socket connection broken")
-            total_sent += sent
-            # 關鍵：每次傳送後暫停 10ms，讓 Pico W 的網路堆疊有時間清空緩衝區
-            time.sleep(0.01)
-        except OSError as e:
-            print(f"Error sending chunk: {e}")
-            break
+    try:
+        while total_sent < len(mv):
+            try:
+                chunk_end = min(total_sent + chunk_size, len(mv))
+                sent = cl.send(mv[total_sent:chunk_end])
+                if sent == 0:
+                    raise OSError("Socket connection broken")
+                total_sent += sent
+                # 關鍵：每次傳送後暫停 10ms，讓 Pico W 的網路堆疊有時間清空緩衝區
+                time.sleep(0.01)
+            except OSError as e:
+                print(f"Error sending chunk: {e}")
+                break
+    finally:
+        del mv
 
 def send_html_page(cl, networks, current_profile=None):
     """Sends configuration HTML page using chunked sending with improved stability and UI."""

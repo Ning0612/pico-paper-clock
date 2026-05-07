@@ -11,9 +11,11 @@ class AppState:
 
         self.current_weather = None
         self.current_weather_last_updated = -1
+        self.current_weather_last_attempted = -1
 
         self.weather_forecast = None
         self.weather_forecast_last_updated = -1
+        self.weather_forecast_last_attempted = -1
         
         # DHT22 local sensor data
         self.current_temperature = None

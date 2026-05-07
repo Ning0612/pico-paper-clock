@@ -3,7 +3,6 @@ import time
 import gc
 from wifi_manager import wifi_manager, create_lan_config_server
 from netutils import sync_time
-from discord_notifier import send_lan_ip
 from file_manager import list_files, shuffle_files
 from display_manager import update_page_loading
 from app_state import AppState
@@ -22,13 +21,11 @@ def main():
     # 2. Wi-Fi Connection: Attempt to connect to Wi-Fi
     wlan = wifi_manager()
     lan_server = None
+    lan_ip = None
     if wlan and wlan.isconnected():
         lan_ip = wlan.ifconfig()[0]
         lan_server = create_lan_config_server()
         sync_time()
-        gc.collect()
-        time.sleep(1)
-        send_lan_ip(lan_ip)
         gc.collect()
 
     # 3. Prepare Image List: Load and shuffle custom images
@@ -37,7 +34,7 @@ def main():
     app_state.image_name_list = shuffle_files(app_state.image_name_list)
 
     # 4. Initialize Controller: Set up the main application controller
-    controller = AppController(app_state, hardware, lan_server)
+    controller = AppController(app_state, hardware, lan_server, lan_ip)
 
     # 5. Main Loop: Continuously run the application logic
     while True:

@@ -5,19 +5,23 @@ import network
 import gc
 import ujson
 
+OPENWEATHER_BASE_URL = "http://api.openweathermap.org/data/2.5"
 FORECAST_COUNTS = (24, 20, 16, 12, 8)
 
-def _make_request_with_retry(url, max_retries=3, delay=5):
+def _make_request_with_retry(url, max_retries=2, delay=2):
     """Makes an HTTP request with retry mechanism and error handling."""
     for attempt in range(max_retries):
+        response = None
         try:
-            response = urequests.get(url, timeout=10)
+            gc.collect()
+            response = urequests.get(url, timeout=5)
             if response.status_code == 200:
                 print(f"Memory available after request: {gc.mem_free()} bytes.")
-                return response
+                result = response
+                response = None
+                return result
             else:
                 print(f"Error: API request failed on attempt {attempt + 1}/{max_retries}. Status code: {response.status_code}")
-                response.close()
         except OSError as e:
             if e.errno == 103:
                 print(f"Warning: Connection aborted on attempt {attempt + 1}/{max_retries}.")
@@ -28,6 +32,14 @@ def _make_request_with_retry(url, max_retries=3, delay=5):
             gc.collect()
         except Exception as e:
             print(f"Error: API request exception on attempt {attempt + 1}/{max_retries}. Details: {e}")
+        finally:
+            if response:
+                try:
+                    response.close()
+                except Exception:
+                    pass
+            response = None
+            gc.collect()
         
         if attempt < max_retries - 1:
             time.sleep(delay)
@@ -139,7 +151,7 @@ def _aggregate_forecast_stream(response, days_limit, timezone_offset):
             current_date = month_day
             temps_sum = 0
             temps_count = 0
-            weather_counts = {}
+            weather_counts.clear()
             rain_sum = 0
             rain_count = 0
 
@@ -168,7 +180,7 @@ def fetch_current_weather(api_key, location):
         print("Info: No internet connection. Skipping current weather request.")
         return None
     print(f"Info: Fetching current weather for {location}.")
-    url = "https://api.openweathermap.org/data/2.5/weather?q={},TW&appid={}&units=metric".format(location, api_key)
+    url = "{}/weather?q={},TW&appid={}&units=metric".format(OPENWEATHER_BASE_URL, location, api_key)
     response = _make_request_with_retry(url)
     
     if response:
@@ -213,7 +225,7 @@ def fetch_weather_forecast(api_key, location, days_limit=4, timezone_offset=8):
         response = None
         try:
             gc.collect()
-            url = "https://api.openweathermap.org/data/2.5/forecast?q={0},TW&appid={1}&units=metric&cnt={2}".format(location, api_key, forecast_count)
+            url = "{0}/forecast?q={1},TW&appid={2}&units=metric&cnt={3}".format(OPENWEATHER_BASE_URL, location, api_key, forecast_count)
             response = _make_request_with_retry(url)
 
             if not response:
