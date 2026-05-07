@@ -130,6 +130,16 @@ def collect_files():
                         file_size = os.path.getsize(full_path)
                         all_files.append((full_path, rel_path, file_size))
 
+    html_dir = os.path.join(SOURCE_DIR, "html")
+    if os.path.exists(html_dir):
+        for root, dirs, files in os.walk(html_dir):
+            for file in files:
+                if file.endswith(".bin"):
+                    full_path = os.path.join(root, file).replace("\\", "/")
+                    rel_path = os.path.relpath(full_path, SOURCE_DIR).replace("\\", "/")
+                    file_size = os.path.getsize(full_path)
+                    all_files.append((full_path, rel_path, file_size))
+
     return all_files
 
 def ensure_remote_dirs(path, created_dirs):
