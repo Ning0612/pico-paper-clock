@@ -4,22 +4,37 @@ import urequests
 
 from config_manager import config_manager
 
-JSON_HEADERS = {"Content-Type": "application/json"}
 FULL_DAY_SECONDS = 24 * 60 * 60
-PRESENCE_BAR_WIDTH = 20
+PRESENCE_BAR_WIDTH = 15
 
 def _discord_payload(message):
-    message = message.replace("\\", "\\\\")
-    message = message.replace('"', '\\"')
-    message = message.replace("\r", "\\r").replace("\n", "\\n")
-    return ('{"content":"%s"}' % message).encode("utf-8")
+    buf = bytearray(b'{"content":"')
+    for c in message:
+        o = ord(c)
+        if c == '"':
+            buf.extend(b'\\"')
+        elif c == '\\':
+            buf.extend(b'\\\\')
+        elif c == '\n':
+            buf.extend(b'\\n')
+        elif c == '\r':
+            buf.extend(b'\\r')
+        elif c == '\t':
+            buf.extend(b'\\t')
+        elif 0x20 <= o <= 0x7E:
+            buf.append(o)
+        else:
+            buf.extend('\\u{:04x}'.format(o).encode())
+    buf.extend(b'"}')
+    return bytes(buf)
 
 
 def _post_discord_webhook(webhook_url, payload):
     response = None
     try:
         gc.collect()
-        response = urequests.post(webhook_url, data=payload, headers=JSON_HEADERS, timeout=10)
+        headers = {"Content-Type": "application/json", "Content-Length": str(len(payload))}
+        response = urequests.post(webhook_url, data=payload, headers=headers, timeout=10)
         detail = ""
         if response.status_code not in (200, 204):
             try:
@@ -45,6 +60,8 @@ def _post_discord_webhook(webhook_url, payload):
 
 def _format_duration(seconds):
     seconds = max(0, int(seconds))
+    if seconds < 60:
+        return "{}s".format(seconds)
     hours = seconds // 3600
     minutes = (seconds % 3600) // 60
     if hours:
@@ -66,7 +83,7 @@ def _presence_bar(total_seconds):
     away_percent = 100 - desk_percent
     desk_units = int((total_seconds * PRESENCE_BAR_WIDTH + FULL_DAY_SECONDS // 2) // FULL_DAY_SECONDS)
     away_units = PRESENCE_BAR_WIDTH - desk_units
-    return away_percent, chr(0x25A1) * away_units + chr(0x25A0) * desk_units, desk_percent
+    return away_percent, "[" + chr(0x2591) * away_units + chr(0x2588) * desk_units + "]", desk_percent
 
 
 def _presence_summary_message(date, total_seconds, longest_seconds, session_count):
@@ -113,7 +130,7 @@ def send_lan_ip(ip_address):
 
     status_code = -1
     try:
-        message = "Pi Paper Clock connected: {}".format(ip_address)
+        message = "Pi Paper Clock connected: http://{}".format(ip_address)
         payload = _discord_payload(message)
         status_code, detail = _post_discord_webhook(webhook_url, payload)
         if status_code in (200, 204):
@@ -154,11 +171,14 @@ def send_presence_session(start_date, start_time, end_date, end_time, duration_s
             start_date, start_time, end_date, end_time, duration_seconds
         )
         payload = _discord_payload(message)
-        status_code, _ = _post_discord_webhook(webhook_url, payload)
+        status_code, detail = _post_discord_webhook(webhook_url, payload)
         if status_code in (200, 204):
             print("Success: Discord presence session sent.")
             return True
-        print("Error: Presence session failed. Status code: {}".format(status_code))
+        if detail:
+            print("Error: Presence session failed. Status code: {}. Response: {}".format(status_code, detail))
+        else:
+            print("Error: Presence session failed. Status code: {}".format(status_code))
     except MemoryError:
         print("Error: Memory allocation failed during presence session.")
     except Exception as e:
@@ -190,11 +210,15 @@ def send_presence_summary(summary_line):
         print("Warning: Invalid presence summary format.")
         return False
 
-    date = parts[0]
-    total_seconds = int(parts[1])
-    transitions = int(parts[2])
-    longest_seconds = int(parts[3]) if len(parts) >= 4 else total_seconds
-    session_count = int(parts[4]) if len(parts) >= 5 else (transitions + 1) // 2
+    try:
+        date = parts[0]
+        total_seconds = int(parts[1])
+        transitions = int(parts[2])
+        longest_seconds = int(parts[3]) if len(parts) >= 4 else total_seconds
+        session_count = int(parts[4]) if len(parts) >= 5 else (transitions + 1) // 2
+    except (ValueError, IndexError):
+        print("Warning: Invalid presence summary data.")
+        return False
 
     status_code = -1
     try:
