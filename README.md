@@ -1,4 +1,4 @@
-# Pico Clock Weather Display - 基於 Pico W 與 E-Paper 的 IoT 時鐘
+# Pico Paper Clock - 基於 Pico W 與 E-Paper 的 IoT 時鐘
 
 [![MicroPython](https://img.shields.io/badge/MicroPython-1.22+-blue.svg)](https://micropython.org/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)

@@ -1,8 +1,8 @@
-# Pi-Paper-Clock 設定檔說明
+# Pico Paper Clock 設定檔說明
 
 ## 📋 多設定檔架構
 
-從 v2.0 開始，Pi-Paper-Clock 支援多設定檔功能，讓你可以在不同地點使用不同的設定。
+從 v2.0 開始，Pico Paper Clock 支援多設定檔功能，讓你可以在不同地點使用不同的設定。
 
 ---
 
@@ -274,7 +274,7 @@ A: 系統至少需要保留一個設定檔，無法刪除最後一個。
 
 - [OpenWeatherMap API 文件](https://openweathermap.org/api)
 - [MicroPython 文件](https://docs.micropython.org/)
-- [專案 GitHub](https://github.com/your-repo/pi-paper-clock)
+- [專案 GitHub](https://github.com/Ning0612/pico-paper-clock)
 
 ---
 

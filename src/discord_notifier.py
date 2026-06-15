@@ -130,7 +130,7 @@ def send_lan_ip(ip_address):
 
     status_code = -1
     try:
-        message = "Pi Paper Clock connected: http://{}".format(ip_address)
+        message = "Pico Paper Clock connected: http://{}".format(ip_address)
         payload = _discord_payload(message)
         status_code, detail = _post_discord_webhook(webhook_url, payload)
         if status_code in (200, 204):
