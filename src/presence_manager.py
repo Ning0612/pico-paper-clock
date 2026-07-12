@@ -47,6 +47,18 @@ def _read_lines(path):
     except OSError:
         return []
 
+def _read_first_line(path):
+    _recover_replacement(path)
+    try:
+        with open(path, "r") as f:
+            for line in f:
+                line = line.strip()
+                if line:
+                    return line
+    except OSError:
+        pass
+    return None
+
 def iter_lines(path):
     try:
         with open(path, "r") as f:
@@ -58,17 +70,68 @@ def iter_lines(path):
         return
 
 
+def _exists(path):
+    try:
+        os.stat(path)
+        return True
+    except OSError:
+        return False
+
+
+def _remove_quiet(path):
+    try:
+        os.remove(path)
+    except OSError:
+        pass
+
+
+def _recover_replacement(path):
+    backup_path = path + ".bak"
+    tmp_path = path + ".tmp"
+    if _exists(backup_path):
+        if _exists(path):
+            _remove_quiet(backup_path)
+        else:
+            os.rename(backup_path, path)
+    if _exists(tmp_path):
+        if _exists(path):
+            _remove_quiet(tmp_path)
+        else:
+            os.rename(tmp_path, path)
+
+
+def _commit_tmp(path, tmp_path):
+    """Power-loss-safe replacement used by persistent presence queues."""
+    backup_path = path + ".bak"
+    if _exists(backup_path):
+        if _exists(path):
+            _remove_quiet(backup_path)
+        else:
+            os.rename(backup_path, path)
+
+    moved_old = False
+    try:
+        if _exists(path):
+            os.rename(path, backup_path)
+            moved_old = True
+        os.rename(tmp_path, path)
+        sync = getattr(os, "sync", None)
+        if sync:
+            sync()
+        _remove_quiet(backup_path)
+    except Exception:
+        if not _exists(path) and moved_old and _exists(backup_path):
+            os.rename(backup_path, path)
+        raise
+
+
 def _write_lines(path, lines):
     tmp_path = path + ".tmp"
     with open(tmp_path, "w") as f:
         for line in lines:
             f.write(line)
             f.write("\n")
-    try:
-        os.remove(path)
-    except OSError:
-        pass
-    os.rename(tmp_path, path)
+    _commit_tmp(path, tmp_path)
 
 
 def _append_line(path, line):
@@ -77,15 +140,27 @@ def _append_line(path, line):
         f.write("\n")
 
 def _drop_first_line(path):
-    lines = _read_lines(path)
-    if len(lines) <= 1:
+    tmp_path = path + ".tmp"
+    skipped = False
+    first_remaining = None
+    try:
+        with open(tmp_path, "w") as output:
+            for line in iter_lines(path):
+                if not skipped:
+                    skipped = True
+                    continue
+                if first_remaining is None:
+                    first_remaining = line
+                output.write(line)
+                output.write("\n")
+        _commit_tmp(path, tmp_path)
+        return first_remaining
+    except OSError:
         try:
-            os.remove(path)
+            os.remove(tmp_path)
         except OSError:
             pass
-        return None
-    _write_lines(path, lines[1:])
-    return lines[1]
+        return _read_first_line(path)
 
 
 def _trim_by_date(path, min_date):
@@ -101,11 +176,7 @@ def _trim_by_date(path, min_date):
                 else:
                     changed = True
         if changed:
-            try:
-                os.remove(path)
-            except OSError:
-                pass
-            os.rename(tmp_path, path)
+            _commit_tmp(path, tmp_path)
         else:
             os.remove(tmp_path)
     except OSError:
@@ -116,6 +187,15 @@ def _trim_by_date(path, min_date):
 
 
 class PresenceManager:
+    __slots__ = (
+        "discord_sender", "session_sender", "current_date", "current_state",
+        "last_change_epoch", "last_change_date", "last_change_time",
+        "session_start_epoch", "session_start_date", "session_start_time",
+        "last_adc", "last_threshold", "last_update_epoch", "today_seconds",
+        "today_transitions", "today_longest_session_seconds", "today_session_count",
+        "pending_summary", "pending_session", "flush_summary_first", "last_retry_ms",
+    )
+
     def __init__(self, discord_sender=None, session_sender=None):
         self.discord_sender = discord_sender
         self.session_sender = session_sender
@@ -508,12 +588,10 @@ class PresenceManager:
         return False
 
     def _load_pending_summary(self):
-        lines = _read_lines(PENDING_FILE)
-        return lines[0] if lines else None
+        return _read_first_line(PENDING_FILE)
 
     def _load_pending_session(self):
-        lines = _read_lines(PENDING_SESSION_FILE)
-        return lines[0] if lines else None
+        return _read_first_line(PENDING_SESSION_FILE)
 
     def _save_pending_summary(self, summary):
         try:

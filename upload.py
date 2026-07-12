@@ -2,6 +2,8 @@ import subprocess
 import os
 import argparse
 import time 
+import shutil
+import sys
 
 # --- Configuration ---
 SOURCE_DIR = "src"
@@ -90,7 +92,14 @@ def run_command(command, ignore_exists_error=False, display_output=False, captur
         return False
 
 def get_mpremote_base():
-    return ["mpremote", "connect", MPREMOTE_PORT] if MPREMOTE_PORT else ["mpremote"]
+    executable = shutil.which("mpremote")
+    if not executable:
+        candidate = os.path.join(os.path.dirname(sys.executable), "mpremote.exe")
+        if os.path.exists(candidate):
+            executable = candidate
+    if not executable:
+        executable = "mpremote"
+    return [executable, "connect", MPREMOTE_PORT] if MPREMOTE_PORT else [executable]
 
 def format_bytes(size):
     """
@@ -124,7 +133,7 @@ def collect_files():
         if os.path.exists(image_dir):
             for root, dirs, files in os.walk(image_dir):
                 for file in files:
-                    if file.endswith(".bin"):
+                    if file.endswith(".bin") or file.endswith(".bin.hlsb"):
                         full_path = os.path.join(root, file).replace("\\", "/")
                         rel_path = os.path.relpath(full_path, SOURCE_DIR).replace("\\", "/")
                         file_size = os.path.getsize(full_path)
@@ -190,6 +199,8 @@ def clean_all_files():
     """
     遞迴清除裝置上的所有檔案和目錄
     """
+    print("⚠️  --recursive-clean 會刪除透過網路上傳、且只存在裝置上的所有圖片。")
+    print("   請先使用 Pico Image Tool 保留本地 .bin；此操作不會自動備份裝置內容。")
     base_cmd = get_mpremote_base()
     
     def delete_directory_recursively(dir_path):

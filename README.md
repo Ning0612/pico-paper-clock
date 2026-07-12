@@ -19,6 +19,7 @@
 - **自訂圖片輪播**：可依設定的時間間隔，輪播 `src/image/custom` 資料夾中的圖片。
 - **特殊事件圖片**：在特定日期（如生日或自訂日期）顯示專屬的慶祝圖片，並支援觸控切換。
 - **載入頁面圖片隨機顯示**：裝置啟動時，載入頁面的圖片將隨機顯示，增加趣味性。
+- **網路圖片管理**：LAN/AP 模式提供版本化圖片 API 與 `/images` 管理頁；桌面 Pico Image Tool 可完成轉檔、LAN 掃描、上傳、覆寫及立即預覽。
 - **環境光感測**：在光線昏暗時自動關閉螢幕，節省電力並避免夜間光害。
 - **觸控與按鈕操作**：透過點擊電子紙螢幕進行互動（如切換圖片）。**長按任一實體按鈕 5 秒可進入 AP 設定模式**，方便隨時調整設定。
 - **定時響聲功能**：可設定整點或每半小時透過蜂鳴器發出提示音，音調與音量可調整。
@@ -172,7 +173,7 @@ pip install -r requirements.txt
 #### 🧹 清除功能
 
 * 預設會先清除 Pico 上既有的 `.py` 和 `.json` 檔案，若要跳過清除步驟，可加上 `--no-clean` 參數。
-* 可選擇使用 `--recursive-clean` 參數，**遞迴清除整個裝置所有檔案與資料夾**。
+* 可選擇使用 `--recursive-clean` 參數，**遞迴清除整個裝置所有檔案與資料夾**。這也會刪除只存在裝置上的網路上傳圖片，執行前請保留本地 `.bin`。
 
 #### 🔄 上傳流程
 
@@ -234,7 +235,7 @@ python upload.py
 您也可以在電腦上預先建立設定檔再上傳。此方式適合需要自訂多個設定檔的開發者。
 
 1.  將 `src/config.json.example` 複製一份並改名為 `src/config.json`。
-2.  打開 `src/config.json` 並依據您的需求填寫。請參考 `CONFIG_GUIDE.md` 了解新的多設定檔格式。
+2.  打開 `src/config.json` 並依據您的需求填寫。請參考 [`docs/CONFIG_GUIDE.md`](docs/CONFIG_GUIDE.md) 了解新的多設定檔格式。
 3.  執行 `python upload.py`，腳本會將 `src` 目錄下的所有檔案（包含您的 `config.json`）上傳到裝置。
 
 **注意**：如果您上傳的是舊版 config.json（v1.x 格式），系統會在首次啟動時自動轉換為新的多設定檔格式，並建立名為「預設」的設定檔。
@@ -292,7 +293,7 @@ python upload.py
 | `profile.chime.pitch`         | 音調頻率（Hz）           | 整數   | `880`         |
 | `profile.chime.volume`        | 音量（0~100）            | 整數   | `80`          |
 
-**詳細說明**：請參閱 `CONFIG_GUIDE.md` 了解完整的設定檔格式、使用方式和最佳實踐。
+**詳細說明**：請參閱 [`docs/CONFIG_GUIDE.md`](docs/CONFIG_GUIDE.md) 了解完整的設定檔格式、使用方式和最佳實踐。
 
 **向後兼容**：舊版 config.json 會在首次啟動時自動轉換為新格式，無需手動修改。
 
@@ -316,26 +317,31 @@ python upload.py
 
 ### 圖片轉換
 
-* 本專案輪播的自訂圖片需要是 **1-bit 黑白** 的 `.bin` 格式檔案。
-* **重要提示**：為了達到最好的顯示效果，建議您先將圖片進行 **去背處理**，並儲存為 **透明背景的 `.png` 檔案**。然後，使用 `tools/image_to_bin.py` 工具將其轉換為對應尺寸的灰階 `.bin` 檔案，並放置到正確的圖片資料夾中。
-* **轉換步驟**：
+圖片上傳 API 採無檔頭 1-bit `framebuf.MONO_HLSB`：每列水平打包，bit 0 代表每組 8 像素中最左側像素。裝置會為 API 上傳檔建立 `.hlsb` 格式 sidecar；沒有 marker 的既有 repository／舊版 runtime 圖片仍以 MSB-left 解碼，因此升級不必批次重轉。目標尺寸固定為 custom/events `128x128`、login `296x128`；weather icons 是系統資產，不開放網路修改。
 
-  1. 在您的電腦上執行 `python tools/image_to_bin.py`，這是一個圖形化介面的轉換工具。
-  2. 點擊「選取圖片」並載入您處理好的 `.jpg` 或 `.png` 圖檔。
-  3. 根據圖片用途，設定對應的「輸出寬度」和「輸出高度」：
-     * `image/weather_icons/`：`32x32` 像素
-     * `image/login/`：`296x128` 像素
-     * 其餘圖片（如 `image/custom/`, `image/events/`）：`128x128` 像素
-  4. 點擊「更新預覽」查看轉換效果。
-  5. 點擊「儲存 .bin 檔案」將結果儲存。
-* 將轉換後的 `.bin` 檔案放入 `src/image/` 下對應的資料夾（例如 `src/image/custom` 或 `src/image/events/MMDD`），並再次執行 `upload.py` 上傳即可。
+圖形介面：
+
+```powershell
+.\.venv\Scripts\python.exe tools\image_to_bin.py
+```
+
+CLI 範例：
+
+```powershell
+.\.venv\Scripts\python.exe tools\pico_image_cli.py discover
+.\.venv\Scripts\python.exe tools\pico_image_cli.py convert photo.png --type custom
+.\.venv\Scripts\python.exe tools\pico_image_cli.py upload photo.png --device 192.168.1.50 --type custom --preview
+.\.venv\Scripts\python.exe tools\pico_image_cli.py upload holiday.png --device 192.168.1.50 --type events --event 1225
+```
+
+支援 Floyd–Steinberg、Atkinson、Bayer 4x4、固定 threshold，以及 cover、contain、stretch 三種縮放策略。透明圖片會先合成白底並套用 EXIF 方向。GUI/CLI 預設在原圖旁保留 `.bin`，避免裝置清理後無法復原。完整 API 請見 [`docs/IMAGE_API.md`](docs/IMAGE_API.md)。
 
 #### 圖片處理說明（轉換原理）
 
-* 圖片載入後會先被縮放至指定尺寸，確保顯示正確。
-* 接著，圖片會自動轉為灰階，並使用 **Floyd–Steinberg 誤差擴散演算法（dithering）** 將灰階圖轉為 **1-bit 黑白圖**。
+* 圖片載入後依 target preset 裁切或縮放至固定尺寸。
+* 接著轉為灰階並套用所選的誤差擴散、ordered dithering 或 threshold。
 * 此演算法會將像素的灰階誤差擴散至周圍像素，以黑白點的排列方式模擬出灰階效果，即使是只有黑與白的 ePaper 裝置，也能呈現出較為平滑的漸層與細節。
-* 最終圖片會轉換為符合 `framebuf.MONO_HLSB` 格式的 `.bin` 檔案，內容為純像素資料（不含檔頭），可直接載入至顯示緩衝區。
+* 最終由工具明確重新打包成 bit 0 在左的 `framebuf.MONO_HLSB`，儲存時會同時建立 `<name>.bin.hlsb` sidecar。透過 `upload.py` 部署或手動複製時必須連同 sidecar；圖片 API 則由裝置自動建立 marker。無 marker 的舊 MSB-left 資產仍可直接顯示。
 
 ---
 
@@ -351,7 +357,8 @@ python upload.py
 - `src/chime.py`: 定時響聲功能模組，控制蜂鳴器發出提示音。
 - `src/config_manager.py`: 設定檔讀寫管理，提供統一的設定存取介面，處理 `config.json` 的載入與儲存。
 - `src/display_manager.py`: 顯示邏輯管理，負責畫面繪製與更新，根據應用程式狀態選擇顯示不同的頁面（天氣、時間、生日等）。
-- `src/display_utils.py`: 顯示相關的工具函數，包含圖片旋轉、文字縮放、圖片繪製等底層顯示操作。
+- `src/display_utils.py`: 以 native rotated canvas、逐列圖片讀取與小型 glyph buffer 完成低記憶體顯示。
+- `src/image_manager.py`: 圖片路徑驗證、交易式上傳／復原、低記憶體目錄列舉與輪播選圖。
 - `src/epaper.py`: 電子紙驅動程式 (請勿修改)，提供與電子紙螢幕硬體互動的介面。
 - `src/file_manager.py`: 檔案操作相關工具，用於列出檔案、隨機排序檔案、獲取圖片路徑等。
 - `src/hardware_manager.py`: 硬體相關操作，負責讀取 ADC 值（光線感測器）、按鈕狀態、觸控事件和 DHT22 溫濕度感測器資料。
@@ -359,7 +366,7 @@ python upload.py
 - `src/weather.py`: 天氣資料獲取與處理，從 OpenWeatherMap API 獲取當前天氣和天氣預報。
 - `src/wifi_manager.py`: Wi-Fi 連線與 AP 模式管理，包含 Web 設定介面，用於使用者配置 Wi-Fi 和其他參數。
 - `src/image/`: 存放所有 `.bin` 圖片資源。
-- `tools/image_to_bin.py`: 圖片轉換工具。
+- `tools/image_to_bin.py`: 相容的 GUI 入口；`tools/pico_image_tool/` 是共用轉檔、網路 client、GUI 與 CLI 核心。
 - `hardware/`: 硬體相關的 CAD 檔案。
 - `upload.py`: 用於部署檔案至 Pico 的腳本。
 

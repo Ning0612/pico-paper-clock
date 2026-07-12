@@ -18,3 +18,11 @@ src/config.json
 src/image/weather_icons/convert.bat
 
 __pycache__
+
+
+.agents/
+.claude/
+.venv/
+.pytest_cache/
+build/
+dist/

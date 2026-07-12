@@ -12,6 +12,7 @@
 
 ```json
 {
+  "schema_version": 3,
   "global": {
     "ap_mode": { ... },
     "weather_api_key": "..."
@@ -21,6 +22,8 @@
   "last_connected_profile": "設定檔名稱"
 }
 ```
+
+`schema_version` 由裝置維護。啟動時會補齊 v3 必要欄位並將硬體相關數值限制在文件範圍；保存使用 `config.json.tmp`／`.bak` 交易，意外斷電後會自動復原。請勿手動降低版本號。
 
 ### 舊版格式（v1.x）自動遷移
 

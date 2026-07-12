@@ -1,4 +1,5 @@
 {
+  "schema_version": 3,
   "global": {
     "ap_mode": {
       "ssid": "Pi_Clock_AP",

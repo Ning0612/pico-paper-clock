@@ -1,9 +1,6 @@
 # display_manager.py
 from display_utils import draw_scaled_text, draw_image, display_rotated_screen
-from netutils import get_local_time
-from file_manager import list_files, get_image_path, shuffle_files
-import random
-import time
+from image_manager import image_catalog
 
 def update_page_weather(current_weather, weather_forecast, display_image_path, partial_update, t, dht22_temp=None, dht22_humidity=None):
     """Updates the display to show weather and time information with DHT22 sensor data and custom image.
@@ -80,7 +77,7 @@ def update_page_time_image(display_image_path, partial_update, t):
         draw_image(canvas, display_image_path, 128, 128, 168, 0)
     display_rotated_screen(draw, angle=90, partial_update=partial_update)
 
-def update_page_birthday(partial_update, t):
+def update_page_birthday(partial_update, t, image_path=None):
     """Updates the display to show a birthday message and image."""
     def draw(canvas):
         date_str = "{:02d}/{:02d}".format(t[1], t[2])
@@ -90,9 +87,6 @@ def update_page_birthday(partial_update, t):
         draw_scaled_text(canvas, "Happy", 15, 80, 2, 0)
         draw_scaled_text(canvas, "Birthday!", 15, 100, 2, 0)
 
-        image_dir = "/image/events/birthday"
-        file_list = list_files(image_dir)
-        image_path = get_image_path(image_dir, file_list, offset=0)
         if image_path:
             draw_image(canvas, image_path, 128, 128, 168, 0)
         else:
@@ -103,15 +97,23 @@ def update_page_birthday(partial_update, t):
 def update_page_loading(partial_update):
     """Updates the display to show a loading screen with a random image."""
     def draw(canvas):
-        image_dir = "/image/login"
-        file_list = list_files(image_dir)
-        if file_list:
-            image_name = random.choice(file_list)
-            image_path = f"{image_dir}/{image_name}.bin"
+        image_path = image_catalog.select_loading()
+        if image_path:
             draw_image(canvas, image_path, 296, 128, 0, 0)
         else:
             draw_scaled_text(canvas, "No image", 20, 20, 2, 0)
     display_rotated_screen(draw, angle=90, partial_update=partial_update)
+
+def update_page_image_preview(image_path, width, height):
+    """Shows a just-uploaded image without changing the active rotation state."""
+    def draw(canvas):
+        if width == 296 and height == 128:
+            draw_image(canvas, image_path, width, height, 0, 0)
+        else:
+            draw_scaled_text(canvas, "Uploaded", 12, 38, 2, 0)
+            draw_scaled_text(canvas, "Preview", 20, 64, 2, 0)
+            draw_image(canvas, image_path, width, height, 168, 0)
+    display_rotated_screen(draw, angle=90, partial_update=False)
 
 def update_display_Restart():
     """Updates the display to show a reboot message."""

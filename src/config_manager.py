@@ -2,26 +2,59 @@ import ujson
 import os
 
 CONFIG_FILE = 'config.json'
+CONFIG_TMP_FILE = CONFIG_FILE + '.tmp'
+CONFIG_BACKUP_FILE = CONFIG_FILE + '.bak'
+CONFIG_SCHEMA_VERSION = 3
 
 class ConfigManager:
     """Manages application configuration with multi-profile support."""
 
     def __init__(self):
         self.config = self._load_config()
+        self.read_only = self._schema_version_value() > CONFIG_SCHEMA_VERSION
+        if self.read_only:
+            print("Warning: Config schema is newer than this firmware; using read-only compatibility mode.")
+            return
         self._migrate_legacy_config()
+        self._normalize_config()
 
     def _load_config(self):
         """Loads configuration from the CONFIG_FILE."""
+        for candidate in (CONFIG_FILE, CONFIG_TMP_FILE, CONFIG_BACKUP_FILE):
+            if not self._path_exists(candidate):
+                continue
+            try:
+                with open(candidate, 'r') as f:
+                    config = ujson.load(f)
+                if candidate != CONFIG_FILE:
+                    try:
+                        os.remove(CONFIG_FILE)
+                    except OSError:
+                        pass
+                    os.rename(candidate, CONFIG_FILE)
+                for stale in (CONFIG_TMP_FILE, CONFIG_BACKUP_FILE):
+                    if stale == candidate:
+                        continue
+                    try:
+                        os.remove(stale)
+                    except OSError:
+                        pass
+                return config
+            except (OSError, ValueError):
+                continue
+        return self._get_default_config()
+
+    def _path_exists(self, path):
         try:
-            with open(CONFIG_FILE, 'r') as f:
-                return ujson.load(f)
-        except (OSError, ValueError):
-            # Return new format default config
-            return self._get_default_config()
+            os.stat(path)
+            return True
+        except OSError:
+            return False
 
     def _get_default_config(self):
         """Returns a default configuration in new format."""
         return {
+            "schema_version": CONFIG_SCHEMA_VERSION,
             "global": {
                 "ap_mode": {
                     "ssid": "Pi_Clock_AP",
@@ -68,6 +101,7 @@ class ConfigManager:
 
             legacy = self.config
             new_config = {
+                "schema_version": CONFIG_SCHEMA_VERSION,
                 "global": {
                     "ap_mode": {
                         "ssid": legacy.get("ap_mode", {}).get("ssid", "Pi_Clock_AP"),
@@ -109,11 +143,187 @@ class ConfigManager:
             self.config = new_config
             self._save_config()
             print("Success: Config migrated to multi-profile format.")
+        elif self._schema_version_value() < CONFIG_SCHEMA_VERSION:
+            self.config["schema_version"] = CONFIG_SCHEMA_VERSION
+            self._save_config()
+        elif self._schema_version_value() > CONFIG_SCHEMA_VERSION:
+            print("Warning: Config schema is newer than this firmware; preserving version.")
+
+    def _normalize_config(self):
+        """Fill required v3 keys and clamp hardware-facing numeric settings."""
+        changed = False
+        defaults = self._get_default_config()
+        if not isinstance(self.config.get("global"), dict):
+            self.config["global"] = defaults["global"]
+            changed = True
+        global_config = self.config["global"]
+        for key, value in defaults["global"].items():
+            if key not in global_config:
+                global_config[key] = value
+                changed = True
+            elif isinstance(value, dict) and isinstance(global_config[key], dict):
+                for child_key, child_value in value.items():
+                    if child_key not in global_config[key]:
+                        global_config[key][child_key] = child_value
+                        changed = True
+
+        profiles = self.config.get("profiles")
+        if not isinstance(profiles, list) or not profiles:
+            self.config["profiles"] = defaults["profiles"]
+            profiles = self.config["profiles"]
+            changed = True
+        profile_default = defaults["profiles"][0]
+        for profile in profiles:
+            if "name" not in profile:
+                profile["name"] = "預設"
+                changed = True
+            for section in ("wifi", "user", "chime"):
+                if not isinstance(profile.get(section), dict):
+                    profile[section] = dict(profile_default[section])
+                    changed = True
+                else:
+                    for key, value in profile_default[section].items():
+                        if key not in profile[section]:
+                            profile[section][key] = value
+                            changed = True
+            if "weather_location" not in profile:
+                profile["weather_location"] = profile_default["weather_location"]
+                changed = True
+
+            user = profile["user"]
+            normalized = {
+                "light_threshold": self._clamp_int(user.get("light_threshold"), 0, 65535, 56000),
+                "image_interval_min": self._clamp_int(user.get("image_interval_min"), 1, 60, 2),
+                "timezone_offset": self._clamp_int(user.get("timezone_offset"), -12, 14, 8),
+            }
+            chime = profile["chime"]
+            normalized_chime = {
+                "pitch": self._clamp_int(chime.get("pitch"), 100, 5000, 880),
+                "volume": self._clamp_int(chime.get("volume"), 0, 100, 80),
+            }
+            for key, value in normalized.items():
+                if user.get(key) != value:
+                    user[key] = value
+                    changed = True
+            for key, value in normalized_chime.items():
+                if chime.get(key) != value:
+                    chime[key] = value
+                    changed = True
+
+        names = [profile.get("name") for profile in profiles]
+        if self.config.get("active_profile") not in names:
+            self.config["active_profile"] = names[0]
+            changed = True
+        if self.config.get("last_connected_profile") not in names:
+            if self.config.get("last_connected_profile") is not None:
+                self.config["last_connected_profile"] = None
+                changed = True
+        if self._schema_version_value() < CONFIG_SCHEMA_VERSION:
+            self.config["schema_version"] = CONFIG_SCHEMA_VERSION
+            changed = True
+        if changed:
+            self._save_config()
+
+    def _clamp_int(self, value, minimum, maximum, default):
+        try:
+            return min(maximum, max(minimum, int(value)))
+        except (TypeError, ValueError):
+            return default
+
+    def _schema_version_value(self):
+        try:
+            return int(self.config.get("schema_version", 0))
+        except (TypeError, ValueError):
+            return 0
 
     def _save_config(self):
         """Saves the current configuration to the CONFIG_FILE."""
-        with open(CONFIG_FILE, 'w') as f:
+        if self.read_only:
+            raise ValueError("Configuration schema is newer than this firmware.")
+        with open(CONFIG_TMP_FILE, 'w') as f:
             ujson.dump(self.config, f)
+        if hasattr(os, "sync"):
+            os.sync()
+        moved_existing = False
+        try:
+            os.remove(CONFIG_BACKUP_FILE)
+        except OSError:
+            pass
+        try:
+            if self._path_exists(CONFIG_FILE):
+                os.rename(CONFIG_FILE, CONFIG_BACKUP_FILE)
+                moved_existing = True
+            os.rename(CONFIG_TMP_FILE, CONFIG_FILE)
+            if hasattr(os, "sync"):
+                os.sync()
+            if moved_existing:
+                try:
+                    os.remove(CONFIG_BACKUP_FILE)
+                except OSError:
+                    pass
+        except Exception:
+            if moved_existing and not self._path_exists(CONFIG_FILE) and self._path_exists(CONFIG_BACKUP_FILE):
+                try:
+                    os.rename(CONFIG_BACKUP_FILE, CONFIG_FILE)
+                except OSError:
+                    pass
+            raise
+
+    def _require_writable(self):
+        if self.read_only:
+            raise ValueError("Configuration schema is newer than this firmware.")
+
+    def _set_global_value(self, key, value):
+        keys = key.split('.')
+        if "global" not in self.config:
+            self.config["global"] = {}
+        target = self.config["global"]
+        for index, part in enumerate(keys):
+            if index == len(keys) - 1:
+                target[part] = value
+            else:
+                if part not in target or not isinstance(target[part], dict):
+                    target[part] = {}
+                target = target[part]
+
+    def apply_profile_update(self, original_name, profile_data, global_updates=None,
+                             activate=True, mark_connected=True):
+        """Validates and saves a profile plus global settings in one flash transaction."""
+        self._require_writable()
+        new_name = profile_data.get("name", "")
+        if not new_name:
+            raise ValueError("Profile name is required.")
+        if original_name != new_name and self.get_profile(new_name) is not None:
+            raise ValueError("Profile name already exists.")
+
+        target_index = -1
+        for index, profile in enumerate(self.config.get("profiles", [])):
+            if profile.get("name") == original_name:
+                target_index = index
+                break
+        if target_index < 0:
+            raise ValueError("Profile does not exist.")
+
+        self.config["profiles"][target_index] = profile_data
+        for key, value in (global_updates or {}).items():
+            if value is not None:
+                self._set_global_value(key, value)
+        if activate:
+            self.config["active_profile"] = new_name
+        elif self.config.get("active_profile") == original_name:
+            self.config["active_profile"] = new_name
+        if mark_connected:
+            self.config["last_connected_profile"] = new_name
+        elif self.config.get("last_connected_profile") == original_name:
+            self.config["last_connected_profile"] = new_name
+        if self._schema_version_value() <= CONFIG_SCHEMA_VERSION:
+            self.config["schema_version"] = CONFIG_SCHEMA_VERSION
+        try:
+            self._save_config()
+        except Exception:
+            self.config = self._load_config()
+            raise
+        return True
 
     # ========== Profile Management Methods ==========
 
@@ -133,6 +343,7 @@ class ConfigManager:
         Adds a new profile to the configuration.
         profile_data should be a complete profile dict with all required fields.
         """
+        self._require_writable()
         # Check if profile name already exists
         if self.get_profile(profile_data["name"]) is not None:
             raise ValueError(f"Profile '{profile_data['name']}' already exists.")
@@ -146,6 +357,7 @@ class ConfigManager:
 
     def update_profile(self, profile_name, profile_data):
         """Updates an existing profile with new data."""
+        self._require_writable()
         for i, profile in enumerate(self.config.get("profiles", [])):
             if profile["name"] == profile_name:
                 # If name is being changed, check for conflicts
@@ -167,6 +379,7 @@ class ConfigManager:
 
     def delete_profile(self, profile_name):
         """Deletes a profile from the configuration."""
+        self._require_writable()
         # Don't allow deleting the last profile
         if len(self.config.get("profiles", [])) <= 1:
             raise ValueError("Cannot delete the last profile.")
@@ -196,6 +409,7 @@ class ConfigManager:
 
     def set_active_profile(self, profile_name):
         """Sets the active profile."""
+        self._require_writable()
         if self.get_profile(profile_name) is None:
             raise ValueError(f"Profile '{profile_name}' does not exist.")
 
@@ -204,6 +418,7 @@ class ConfigManager:
 
     def set_last_connected_profile(self, profile_name):
         """Records the last successfully connected profile."""
+        self._require_writable()
         if profile_name is not None and self.get_profile(profile_name) is None:
             raise ValueError(f"Profile '{profile_name}' does not exist.")
 
@@ -277,6 +492,7 @@ class ConfigManager:
         Sets a configuration value using a dot-separated key.
         Automatically determines whether to set in global or active profile.
         """
+        self._require_writable()
         # Handle global settings
         if key.startswith("ap_mode."):
             sub_key = key[8:]
@@ -334,17 +550,8 @@ class ConfigManager:
 
     def set_global(self, key, value):
         """Sets a value in global settings."""
-        keys = key.split('.')
-        if "global" not in self.config:
-            self.config["global"] = {}
-        val = self.config["global"]
-        for i, k in enumerate(keys):
-            if i == len(keys) - 1:
-                val[k] = value
-            else:
-                if k not in val or not isinstance(val[k], dict):
-                    val[k] = {}
-                val = val[k]
+        self._require_writable()
+        self._set_global_value(key, value)
         self._save_config()
 
 config_manager = ConfigManager()

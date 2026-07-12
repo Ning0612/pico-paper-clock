@@ -230,6 +230,13 @@ class EPD_2in9:
         self.config.digital_write(self.config.cs_pin, 0)
         self.config.spi_writebyte([data])
         self.config.digital_write(self.config.cs_pin, 1)
+
+    def send_data_buffer(self, data):
+        """Send an existing bytes-like buffer without per-byte allocations."""
+        self.config.digital_write(self.config.dc_pin, 1)
+        self.config.digital_write(self.config.cs_pin, 0)
+        self.config.spi.write(data)
+        self.config.digital_write(self.config.cs_pin, 1)
         
     def ReadBusy(self):
         # print("e-Paper busy")
@@ -364,20 +371,16 @@ class EPD_2in9:
         if (image == None):
             return            
         self.send_command(0x24) # WRITE_RAM
-        for i in range(0, self.height * int(self.width/8)):
-            # for i in range(0, int(self.width / 8)):
-            self.send_data(image[i])   
+        self.send_data_buffer(image)
         self.TurnOnDisplay()
 
     def display_Base(self, image):
         if (image == None):
             return   
         self.send_command(0x24) # WRITE_RAM
-        for i in range(0, self.height * int(self.width/8)):
-            self.send_data(image[i])
+        self.send_data_buffer(image)
         self.send_command(0x26) # WRITE_RAM
-        for i in range(0, self.height * int(self.width/8)):
-            self.send_data(image[i])
+        self.send_data_buffer(image)
         self.TurnOnDisplay()
         
     def display_Partial(self, image):
@@ -413,8 +416,7 @@ class EPD_2in9:
         self.SetCursor(0, 0)
         
         self.send_command(0x24) # WRITE_RAM
-        for i in range(0, self.height * int(self.width/8)):
-            self.send_data(image[i])
+        self.send_data_buffer(image)
         self.TurnOnDisplay_Partial()
 
 

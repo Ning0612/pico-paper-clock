@@ -4,8 +4,8 @@ import gc
 from config_manager import config_manager
 from netutils import sync_time, get_local_time
 from weather import fetch_current_weather, fetch_weather_forecast
-from display_manager import update_page_weather, update_page_time_image, update_page_birthday
-from file_manager import get_image_path, get_date_event_images, shuffle_files
+from display_manager import update_page_weather, update_page_time_image, update_page_birthday, update_page_image_preview
+from image_manager import image_catalog, image_store
 from wifi_manager import reset_wifi_and_reboot
 from chime import Chime
 from discord_notifier import send_lan_ip, send_presence_session, send_presence_summary
@@ -22,6 +22,13 @@ FORECAST_MAX_AGE_MS = 4 * 60 * 60 * 1000
 
 class AppController:
     """Manages the application's main logic, including hardware interaction, display updates, and data fetching."""
+    __slots__ = (
+        "state", "hw", "lan_server", "lan_ip", "startup_discord_sent",
+        "startup_discord_disabled", "startup_discord_attempted", "startup_discord_ready_ms",
+        "startup_discord_last_attempt_ms", "chime", "location", "api_key",
+        "time_zone_offset", "presence",
+    )
+
     def __init__(self, state, hardware, lan_server=None, lan_ip=None):
         """Initializes the AppController.
 
@@ -52,12 +59,8 @@ class AppController:
     def handle_touch(self, touch_state):
         # Handle touch events and switch images
         if touch_state and touch_state[0] == "Touch" and touch_state[1][0] > 168:
-            if self.state.event_image_list:
-                self.state.event_image_offset = (self.state.event_image_offset + 1) % len(self.state.event_image_list)
-                print(f"Event image changed, offset: {self.state.event_image_offset}")
-            elif self.state.image_name_list:
-                self.state.image_offset = (self.state.image_offset + 1) % len(self.state.image_name_list)
-                print(f"Image changed, offset: {self.state.image_offset}")
+            image_catalog.advance()
+            print("Image rotation advanced by touch.")
 
     def handle_buttons(self):
         """Handles button long press detection using unified hardware manager approach."""
@@ -74,6 +77,12 @@ class AppController:
         weather_used_network = False
         if self.lan_server:
             self.lan_server.poll()
+
+        preview = image_store.consume_preview()
+        if preview:
+            update_page_image_preview(preview[0], preview[1], preview[2])
+            gc.collect()
+            return
 
         adc_value = self.hw.get_adc_value()
         touch_state = self.hw.get_touch_state()
@@ -155,22 +164,24 @@ class AppController:
         Args:
             t (tuple): Current time tuple.
         """
-        image_directory = "/image/custom"
-        self.state.display_image_path = get_image_path(image_directory, self.state.image_name_list, self.state.image_offset)
-
-        # Check for date-specific events
         current_date = f"{t[1]:02d}{t[2]:02d}"
-        if current_date != self.state.current_event_date:
-            self.state.current_event_date = current_date
-            self.state.event_image_list = get_date_event_images(current_date)
-            if self.state.event_image_list:
-                self.state.event_image_list = shuffle_files(self.state.event_image_list)
-                self.state.event_image_offset = 0
-                print(f"Date event found for {current_date}, loaded {len(self.state.event_image_list)} images.")
+        birthday = config_manager.get("user.birthday", "0101")
+        image_interval = config_manager.get("user.image_interval_min", 2)
+        self.state.display_image_path = image_catalog.select(
+            current_date,
+            birthday,
+            image_interval,
+        )
+        self.state.current_event_date = current_date
+        birthday_image = (
+            birthday == current_date and
+            self.state.display_image_path and
+            self.state.display_image_path.startswith("/image/events/birthday/")
+        )
 
         # Page rendering logic
-        if config_manager.get("user.birthday") == current_date:
-            update_page_birthday(self.state.partial_update, t)
+        if birthday_image:
+            update_page_birthday(self.state.partial_update, t, self.state.display_image_path)
         elif self.state.current_weather and self.state.weather_forecast:
             update_page_weather(
                 self.state.current_weather, 

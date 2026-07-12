@@ -5,6 +5,22 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，
 且本專案遵循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
+## [Unreleased]
+
+### Added
+- 新增低記憶體圖片 API、`/images` 裝置管理頁與圖片交易復原。
+- 新增 Pico Image Tool GUI/CLI、LAN 探索、四種抖動、三種 fit 與 Windows PyInstaller build 規格。
+- 新增圖片格式與交易 golden tests。
+
+### Changed
+- AP/LAN Web server 共用同一 dispatcher；設定頁改用靜態 HTML 與版本化設定 API。
+- 顯示改為單一 native framebuffer、逐列圖片讀取與批次 SPI 傳輸。
+- 設定保存改為 schema v3 單次交易，presence pending queue 改為串流處理。
+
+### Fixed
+- `image_interval_min` 現在實際控制輪播間隔，日期事件圖片會依生日、MMDD、custom 優先序顯示。
+- MONO_HLSB 明確採 bit 0 為左側像素，避免每 8 像素位元順序錯誤。
+
 ## [2.0.1] - 2025-12-31
 
 ### 安全性修復 (Security)
