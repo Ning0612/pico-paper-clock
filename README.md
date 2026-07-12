@@ -3,7 +3,7 @@
 [![MicroPython](https://img.shields.io/badge/MicroPython-1.22+-blue.svg)](https://micropython.org/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Hardware](https://img.shields.io/badge/Hardware-Raspberry%20Pi%20Pico%20W-red.svg)](https://www.raspberrypi.com/products/raspberry-pi-pico-w/)
-[![License: CC BY-NC 4.0](https://img.shields.io/badge/License-CC%20BY--NC%204.0-lightgrey.svg)](https://creativecommons.org/licenses/by-nc/4.0/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
 本專案是一個基於 Raspberry Pi Pico W 和 Waveshare 2.9 吋電子紙顯示器的 IoT 智慧時鐘。它不僅能顯示時間，還能連接網路獲取天氣資訊、輪播自訂圖片，並具備光線感應與觸控功能。
 
@@ -403,17 +403,15 @@ CLI 範例：
 
 ## 📄 本專案授權條款
 
-本專案之程式碼與資源（不含上述第三方資源）採用：
+本專案原創 source code 採用 [MIT License](LICENSE)。
 
-### 📘 Creative Commons Attribution-NonCommercial 4.0 International (CC BY-NC 4.0)
+授權邊界：
 
-您可以：
+- 原創程式碼：MIT。
+- Waveshare 範例衍生／參考程式碼：保留其 MIT notice。
+- `src/image/weather_icons/`：衍生自 `erikflowers/weather-icons`，維持 OFL-1.1。
+- `DEMO.jpg`、`AP_Mode_DEMO.png`、自訂圖片、CAD 檔與 firmware binary：不包含在 source-code MIT 授權範圍內，除非另有明確聲明。
 
-- ✅ 自由使用、學習、修改本專案內容
-- ✅ 分享或轉載（需保留原作者資訊與授權聲明）
-- ❌ 禁止任何形式的商業用途（如販售、商業課程、廣告嵌入、產品整合等）
-
-若有商業用途需求，請聯繫原作者取得授權。
-詳細授權條款請參見：[https://creativecommons.org/licenses/by-nc/4.0/deed.zh_TW](https://creativecommons.org/licenses/by-nc/4.0/deed.zh_TW)
+第三方與素材細節請見 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) 與 [ASSET_CREDITS.md](ASSET_CREDITS.md)。
 
 ---
