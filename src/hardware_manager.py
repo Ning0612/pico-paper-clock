@@ -1,8 +1,12 @@
 # hardware_manager.py
 import time
+import gc
 import dht
 from machine import ADC, Pin
 from epaper import ICNT86, ICNT_Development, get_touch_state
+
+DHT_READ_INTERVAL_MS = 2500
+DHT_FAILURE_RETRY_MS = 10000
 
 class HardwareManager:
     """Manages hardware components like ADC, buttons, and touch panel."""
@@ -20,11 +24,15 @@ class HardwareManager:
         self.tp.ICNT_Init()
         
         # DHT22 temperature/humidity sensor on GP19
-        self.dht_sensor = dht.DHT22(Pin(19))
-        # Initialize to allow first read immediately (2001ms in the past)
-        self.dht_last_read_ms = time.ticks_add(time.ticks_ms(), -2001)
+        self.dht_pin = Pin(19, Pin.IN, Pin.PULL_UP)
+        self.dht_sensor = dht.DHT22(self.dht_pin)
+        # Allow the first read immediately; later reads leave a small margin
+        # beyond DHT22's two-second minimum interval.
+        self.dht_next_read_ms = time.ticks_ms()
+        self.dht_last_read_ms = -1
         self.dht_last_temperature = None
         self.dht_last_humidity = None
+        self.dht_cached_values = None
         
         # Button long press detection
         self.button_press_timestamps = {}
@@ -94,39 +102,51 @@ class HardwareManager:
         
         Returns:
             tuple: (temperature_celsius, humidity_percent) on success, None on failure.
-                   Returns cached values if called within 2 seconds of last read.
+                   Returns the last successful values while a read is throttled or
+                   temporarily unavailable.
         """
         current_time_ms = time.ticks_ms()
-        
-        # Throttling: DHT22 requires minimum 2 seconds between reads
-        if time.ticks_diff(current_time_ms, self.dht_last_read_ms) < 2000:
-            # Return cached values if available
-            if self.dht_last_temperature is not None and self.dht_last_humidity is not None:
-                return (self.dht_last_temperature, self.dht_last_humidity)
-            return None
-        
+
+        if time.ticks_diff(current_time_ms, self.dht_next_read_ms) < 0:
+            return self.dht_cached_values
+
+        # The DHT driver uses a software-timed protocol.  Reclaim fragmented
+        # heap before starting it, while keeping the sensor read outside the
+        # network/weather allocation path.
+        gc.collect()
         try:
+            if self.dht_pin.value() == 0:
+                raise OSError("GPIO19 data line is low; check DHT22 power and pull-up")
             # Read sensor (measure() must be called before reading values)
             self.dht_sensor.measure()
             temperature = self.dht_sensor.temperature()
             humidity = self.dht_sensor.humidity()
-            
-            # Update throttle timestamp regardless of value validity
+
+            if (
+                temperature is None or humidity is None or
+                temperature != temperature or humidity != humidity or
+                temperature < -40 or temperature > 80 or
+                humidity < 0 or humidity > 100
+            ):
+                raise ValueError("invalid sensor values")
+
             self.dht_last_read_ms = current_time_ms
-            
-            # Validate sensor values before caching
-            if temperature is not None and humidity is not None:
-                # Cache successful read
-                self.dht_last_temperature = temperature
-                self.dht_last_humidity = humidity
-                return (temperature, humidity)
-            else:
-                print("DHT22: Invalid sensor values (None)")
-                return None
-            
+            self.dht_last_temperature = temperature
+            self.dht_last_humidity = humidity
+            self.dht_cached_values = (temperature, humidity)
+            self.dht_next_read_ms = time.ticks_add(current_time_ms, DHT_READ_INTERVAL_MS)
+            return self.dht_cached_values
+
+        except MemoryError:
+            print("DHT22: Read skipped because memory is low; keeping previous values")
         except (OSError, ValueError) as e:
-            print(f"DHT22 sensor read error: {e}")
-            # CRITICAL: Update timestamp even on error to prevent repeated failed reads
-            self.dht_last_read_ms = current_time_ms
-            # Return None on error, controller will preserve old state values
-            return None
+            print(f"DHT22 sensor read error: {e}; keeping previous values")
+        except Exception as e:
+            print(f"DHT22 sensor unavailable: {e}; keeping previous values")
+
+        # A failed transaction also counts as an attempted measurement.  Wait
+        # longer before retrying so a disconnected/noisy sensor cannot flood
+        # the serial log or repeatedly compete for heap during network work.
+        self.dht_next_read_ms = time.ticks_add(current_time_ms, DHT_FAILURE_RETRY_MS)
+        gc.collect()
+        return self.dht_cached_values

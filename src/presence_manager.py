@@ -194,6 +194,7 @@ class PresenceManager:
         "last_adc", "last_threshold", "last_update_epoch", "today_seconds",
         "today_transitions", "today_longest_session_seconds", "today_session_count",
         "pending_summary", "pending_session", "flush_summary_first", "last_retry_ms",
+        "discord_disabled",
     )
 
     def __init__(self, discord_sender=None, session_sender=None):
@@ -218,6 +219,7 @@ class PresenceManager:
         self.pending_session = self._load_pending_session()
         self.flush_summary_first = False
         self.last_retry_ms = time.ticks_add(time.ticks_ms(), -600001)
+        self.discord_disabled = False
 
     def update(self, adc_value, threshold, local_time):
         date = _date_key(local_time)
@@ -507,18 +509,25 @@ class PresenceManager:
         if not self.session_sender:
             return False
         try:
-            return self.session_sender(
+            result = self.session_sender(
                 session_summary[0],
                 session_summary[1],
                 session_summary[2],
                 session_summary[3],
                 session_summary[4]
             )
+            if result is None:
+                self.discord_disabled = True
+                print("Presence: disabling Discord notifications after ENOMEM.")
+                return False
+            return result
         except Exception as e:
             print("Presence: Discord session failed. {}".format(e))
         return False
 
     def flush_discord(self):
+        if self.discord_disabled:
+            return False
         if time.ticks_diff(time.ticks_ms(), self.last_retry_ms) < DISCORD_FLUSH_INTERVAL_MS:
             return False
         self.last_retry_ms = time.ticks_ms()
@@ -541,7 +550,7 @@ class PresenceManager:
             self.pending_session = session_line
 
     def _retry_pending_session(self, force=False):
-        if not self.pending_session or not self.session_sender:
+        if self.discord_disabled or not self.pending_session or not self.session_sender:
             return False
         if not force and time.ticks_diff(time.ticks_ms(), self.last_retry_ms) < DISCORD_FLUSH_INTERVAL_MS:
             return False
@@ -575,12 +584,16 @@ class PresenceManager:
             self.pending_summary = summary
 
     def _retry_pending_summary(self, force=False):
-        if not self.pending_summary or not self.discord_sender:
+        if self.discord_disabled or not self.pending_summary or not self.discord_sender:
             return False
         if not force and time.ticks_diff(time.ticks_ms(), self.last_retry_ms) < DISCORD_FLUSH_INTERVAL_MS:
             return False
         try:
-            if self.discord_sender(self.pending_summary):
+            result = self.discord_sender(self.pending_summary)
+            if result is None:
+                self.discord_disabled = True
+                print("Presence: disabling Discord notifications after ENOMEM.")
+            elif result:
                 self._clear_pending_summary()
                 return True
         except Exception as e:

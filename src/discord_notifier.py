@@ -181,8 +181,11 @@ def send_presence_session(start_date, start_time, end_date, end_time, duration_s
             print("Error: Presence session failed. Status code: {}".format(status_code))
     except MemoryError:
         print("Error: Memory allocation failed during presence session.")
+        return None
     except Exception as e:
         print("Error: Presence session failed. Details: {}".format(e))
+        if "ENOMEM" in str(e):
+            return None
     finally:
         payload = None
         gc.collect()
@@ -233,8 +236,11 @@ def send_presence_summary(summary_line):
         print("Error: Presence summary failed. Status code: {}".format(status_code))
     except MemoryError:
         print("Error: Memory allocation failed during presence summary.")
+        return None
     except Exception as e:
         print("Error: Presence summary failed. Details: {}".format(e))
+        if "ENOMEM" in str(e):
+            return None
     finally:
         payload = None
         gc.collect()

@@ -7,6 +7,8 @@ import ujson
 
 OPENWEATHER_BASE_URL = "http://api.openweathermap.org/data/2.5"
 FORECAST_COUNTS = (24, 20, 16, 12, 8)
+FORECAST_READ_BUFFER_SIZE = 256
+MAX_FORECAST_ENTRY_BYTES = 2048
 
 def _make_request_with_retry(url, max_retries=2, delay=2):
     """Makes an HTTP request with retry mechanism and error handling."""
@@ -55,6 +57,35 @@ def _finalize_forecast_day(result, current_date, temps_sum, temps_count, weather
     avg_rain_prob = (rain_sum / rain_count) * 100 if rain_count > 0 else 0
     result.append((current_date, avg_temp, most_common_weather, avg_rain_prob))
 
+def _iter_raw_bytes(raw):
+    """Yields response bytes while reusing a fixed buffer when supported."""
+    buffer = bytearray(FORECAST_READ_BUFFER_SIZE)
+    readinto = getattr(raw, "readinto", None)
+    if readinto is not None:
+        try:
+            while True:
+                count = readinto(buffer)
+                if count is None:
+                    raise OSError("forecast stream has no data")
+                if count < 0:
+                    raise OSError("forecast stream read failed: {}".format(count))
+                if count == 0:
+                    return
+                for index in range(count):
+                    yield buffer[index]
+        except TypeError:
+            # A few host test doubles and older stream wrappers only support
+            # read(size); fall through without losing data.
+            pass
+
+    while True:
+        chunk = raw.read(FORECAST_READ_BUFFER_SIZE)
+        if not chunk:
+            return
+        for value in chunk:
+            yield value
+
+
 def _iter_forecast_entries(response):
     raw = getattr(response, "raw", None)
     if raw is None:
@@ -69,58 +100,55 @@ def _iter_forecast_entries(response):
     depth = 0
     entry = None
 
-    while True:
-        chunk = raw.read(256)
-        if not chunk:
-            break
-
-        for b in chunk:
-            if not in_list:
-                if waiting_for_list:
-                    if b == ord('['):
-                        in_list = True
-                        waiting_for_list = False
-                    continue
-
-                if b == list_key[key_pos]:
-                    key_pos += 1
-                    if key_pos == len(list_key):
-                        waiting_for_list = True
-                        key_pos = 0
-                else:
-                    key_pos = 1 if b == list_key[0] else 0
+    for b in _iter_raw_bytes(raw):
+        if not in_list:
+            if waiting_for_list:
+                if b == ord('['):
+                    in_list = True
+                    waiting_for_list = False
                 continue
 
-            if entry is None:
-                if b == ord('{'):
-                    entry = bytearray()
-                    entry.append(b)
-                    depth = 1
-                    in_string = False
-                    escape = False
-                elif b == ord(']'):
-                    return
-                continue
-
-            entry.append(b)
-            if in_string:
-                if escape:
-                    escape = False
-                elif b == 92:
-                    escape = True
-                elif b == 34:
-                    in_string = False
+            if b == list_key[key_pos]:
+                key_pos += 1
+                if key_pos == len(list_key):
+                    waiting_for_list = True
+                    key_pos = 0
             else:
-                if b == 34:
-                    in_string = True
-                elif b == ord('{'):
-                    depth += 1
-                elif b == ord('}'):
-                    depth -= 1
-                    if depth == 0:
-                        yield entry
-                        entry = None
-                        gc.collect()
+                key_pos = 1 if b == list_key[0] else 0
+            continue
+
+        if entry is None:
+            if b == ord('{'):
+                entry = bytearray()
+                entry.append(b)
+                depth = 1
+                in_string = False
+                escape = False
+            elif b == ord(']'):
+                return
+            continue
+
+        entry.append(b)
+        if len(entry) > MAX_FORECAST_ENTRY_BYTES:
+            raise ValueError("forecast entry is too large")
+        if in_string:
+            if escape:
+                escape = False
+            elif b == 92:
+                escape = True
+            elif b == 34:
+                in_string = False
+        else:
+            if b == 34:
+                in_string = True
+            elif b == ord('{'):
+                depth += 1
+            elif b == ord('}'):
+                depth -= 1
+                if depth == 0:
+                    yield entry
+                    entry = None
+                    gc.collect()
 
 def _aggregate_forecast_stream(response, days_limit, timezone_offset):
     result = []

@@ -110,8 +110,8 @@ class AppController:
             if t[4] != self.state.last_minute or touch_state is not None or self.state.is_first_run:
                 self.handle_touch(touch_state)
                 self._perform_chime(t)
-                weather_used_network = self._update_weather()
                 self._update_sensor_data()
+                weather_used_network = self._update_weather()
                 self._update_display(t)
 
                 self.state.is_first_run = False
@@ -284,6 +284,3 @@ class AppController:
             self.state.current_humidity = humidity
             # Note: timestamp is managed by hardware layer's actual read time
             print(f"DHT22: {temperature}C, {humidity}%")
-        else:
-            # Failed read: preserve old values (None on first failure)
-            print("DHT22: Read failed, keeping previous values")
