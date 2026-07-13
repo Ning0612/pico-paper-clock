@@ -1,5 +1,6 @@
 # Pico Paper Clock
 
+[![CI](https://github.com/Ning0612/pico-paper-clock/actions/workflows/ci.yml/badge.svg)](https://github.com/Ning0612/pico-paper-clock/actions/workflows/ci.yml)
 [![MicroPython](https://img.shields.io/badge/MicroPython-1.22+-blue.svg)](https://micropython.org/)
 [![Python 3.11+](https://img.shields.io/badge/python-3.11+-blue.svg)](https://www.python.org/downloads/)
 [![Hardware](https://img.shields.io/badge/Hardware-Raspberry%20Pi%20Pico%20W-red.svg)](https://www.raspberrypi.com/products/raspberry-pi-pico-w/)
@@ -67,7 +68,7 @@ py -3 -m venv .venv
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 ```
 
-HTML 原始碼在 `tools/html_src/`，生成的 `src/html/*.bin` 不應手動編輯。專案資料流、記憶體限制與資料夾地圖請見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，所有文件入口在 [`docs/README.md`](docs/README.md)。
+GitHub Actions 會在 `main` push、pull request 與手動觸發時，以 Python 3.11/3.12 執行依賴安裝、HTML 生成物檢查、`compileall` 與 unittest。HTML 原始碼在 `tools/html_src/`，生成的 `src/html/*.bin` 不應手動編輯。專案資料流、記憶體限制與資料夾地圖請見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，所有文件入口在 [`docs/README.md`](docs/README.md)。
 
 ## 授權與第三方資產
 
