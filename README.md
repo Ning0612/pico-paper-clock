@@ -50,7 +50,7 @@ py -3 -m venv .venv
 
 必要元件為 Raspberry Pi Pico W、[Waveshare 2.9inch Touch e-Paper HAT](https://www.waveshare.net/wiki/Pico-CapTouch-ePaper-2.9)、LDR、DHT22、無源蜂鳴器與連接線。完整 pin map、接線圖與注意事項請見 [`docs/HARDWARE.md`](docs/HARDWARE.md)。
 
-可選的 SolidWorks 外殼檔案不放在 source tree，下載方式請見 [`docs/RELEASE_ASSETS.md`](docs/RELEASE_ASSETS.md)。
+可選的 3D 外殼 CAD 檔案不放在 source tree；STEP 適合一般 CAD 編輯、STL 適合列印、SLDPRT 適合 SolidWorks 使用者，下載方式請見 [`docs/RELEASE_ASSETS.md`](docs/RELEASE_ASSETS.md)。
 
 ## 使用與設定
 

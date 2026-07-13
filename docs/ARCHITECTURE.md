@@ -68,8 +68,8 @@ main.py
 | `tools/pico_image_tool/` | 轉檔、抖動、client、GUI、CLI | 主機端 Python |
 | `tests/` | 主機回歸與協議測試 | 使用專案 `.venv` |
 | `docs/` | 長期文件與契約 | API／設定／架構同步更新 |
-| `hardware/` | 可放入 source tree 的 CAD、STL 與外殼檔案 | 大型 SolidWorks `.SLDPRT` 改放 GitHub Release assets |
-| `dist/release-assets/` | 本地發布暫存的 UF2 與 `.SLDPRT` | 已被 Git 忽略；建立 Release 時手動附加 |
+| `hardware/` | source tree 中的硬體相關程式與小型原始檔 | 大型 CAD 發行檔不放在這裡 |
+| `dist/release-assets/` | 本地發布暫存的 UF2、STEP、STL 與 `.SLDPRT` | 已被 Git 忽略；建立 Release 時手動附加 |
 
 ## 部署與驗證
 

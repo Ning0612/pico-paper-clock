@@ -7,6 +7,10 @@
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-07-13
+
+本版本發布目前 `Unreleased` 中的功能、穩定性修正與主機端圖片工具；UF2 與 v3 外殼的 STEP、STL、SLDPRT 檔案改由 GitHub Release assets 提供。
+
 ### Added
 - 新增低記憶體圖片 API、`/images` 裝置管理頁與圖片交易復原。
 - 新增 Pico Image Tool GUI/CLI、LAN 探索、四種抖動、三種 fit 與 Windows PyInstaller build 規格。
