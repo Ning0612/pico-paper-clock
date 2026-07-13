@@ -24,6 +24,7 @@ tools/build_html.py  —  HTML source → src/html/*.bin 建置工具
   2. 每行去除前後空白
   3. 移除空行
   4. 相鄰行直接串接（HTML/CSS/JS 中換行不影響語意）
+  5. 若源碼以 HTTP response header 開頭，保留 header 的 CRLF 分隔
 """
 
 import argparse
@@ -41,13 +42,23 @@ def minify(text: str) -> str:
     # 使用非貪婪匹配以避免跨越多個注釋
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
 
+    # reset/success 等獨立頁面會自己攜帶 HTTP response header。
+    # header 必須保留 CRLF，否則裝置直接串流 .bin 時瀏覽器無法辨識回應。
+    response_header = ""
+    if text.startswith("HTTP/"):
+        header_and_body = re.split(r"\r?\n\r?\n", text, maxsplit=1)
+        if len(header_and_body) == 2:
+            header_lines = [line.strip() for line in header_and_body[0].splitlines() if line.strip()]
+            response_header = "\r\n".join(header_lines) + "\r\n\r\n"
+            text = header_and_body[1]
+
     lines = []
     for line in text.splitlines():
         stripped = line.strip()
         if stripped:
             lines.append(stripped)
 
-    return "".join(lines)
+    return response_header + "".join(lines)
 
 
 def build_one(src_path: str, bin_path: str) -> int:
