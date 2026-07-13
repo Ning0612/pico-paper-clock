@@ -527,7 +527,10 @@ class PresenceManager:
 
     def flush_discord(self):
         if self.discord_disabled:
-            return False
+            if time.ticks_diff(time.ticks_ms(), self.last_retry_ms) >= DISCORD_FLUSH_INTERVAL_MS:
+                self.discord_disabled = False
+            else:
+                return False
         if time.ticks_diff(time.ticks_ms(), self.last_retry_ms) < DISCORD_FLUSH_INTERVAL_MS:
             return False
         self.last_retry_ms = time.ticks_ms()

@@ -11,8 +11,8 @@ from chime import Chime
 from discord_notifier import send_lan_ip, send_presence_session, send_presence_summary
 from presence_manager import PresenceManager, set_presence_manager
 
-STARTUP_DISCORD_DELAY_MS = 60 * 1000
-STARTUP_DISCORD_RETRY_MS = 5 * 60 * 1000
+STARTUP_DISCORD_DELAY_MS = 45 * 1000
+STARTUP_DISCORD_RETRY_MS = 30 * 1000
 CURRENT_WEATHER_REFRESH_MS = 3 * 60 * 1000
 CURRENT_WEATHER_RETRY_MS = 10 * 60 * 1000
 FORECAST_REFRESH_MS = 30 * 60 * 1000
@@ -93,6 +93,12 @@ class AppController:
 
         self.handle_buttons()
 
+        # HTTPS/TLS needs a sufficiently large contiguous heap block.  Try
+        # Discord before weather/display work can fragment the heap.
+        discord_used_network = self._send_startup_discord_if_ready()
+        if not discord_used_network:
+            discord_used_network = self.presence.flush_discord()
+
         light_threshold = config_manager.get("user.light_threshold", 55000)
         self.presence.update(adc_value, light_threshold, t)
         time_since_touch = time.time() - self.state.last_touch_time if self.state.last_touch_time != -1 else 3601
@@ -122,7 +128,7 @@ class AppController:
             self.state.is_first_run = True
             self.state.partial_update = False
 
-        if not weather_used_network:
+        if not weather_used_network and not discord_used_network:
             if not self._send_startup_discord_if_ready():
                 if not self._startup_discord_pending():
                     self.presence.flush_discord()
@@ -143,10 +149,11 @@ class AppController:
         self.startup_discord_attempted = True
         result = send_lan_ip(self.lan_ip)
         if result is None:
-            print("Warning: Disabling LAN IP Discord notification after ENOMEM.")
-            self.startup_discord_disabled = True
+            print("Warning: Discord LAN IP notification hit ENOMEM; will retry later.")
         else:
             self.startup_discord_sent = result
+            if result:
+                self.presence.discord_disabled = False
         return True
 
     def _startup_discord_pending(self):

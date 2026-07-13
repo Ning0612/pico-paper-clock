@@ -1,11 +1,23 @@
 import gc
 import network
-import urequests
+import socket
+import ssl
 
 from config_manager import config_manager
 
 FULL_DAY_SECONDS = 24 * 60 * 60
 PRESENCE_BAR_WIDTH = 15
+DISCORD_GC_THRESHOLD = 4096
+
+
+def _write_all(sock, data):
+    offset = 0
+    data_length = len(data)
+    while offset < data_length:
+        written = sock.write(data[offset:])
+        if not written:
+            raise OSError("Discord socket closed during write.")
+        offset += written
 
 def _discord_payload(message):
     buf = bytearray(b'{"content":"')
@@ -30,31 +42,74 @@ def _discord_payload(message):
 
 
 def _post_discord_webhook(webhook_url, payload):
-    response = None
+    raw_socket = None
+    tls_socket = None
+    old_threshold = None
     try:
-        gc.collect()
-        headers = {"Content-Type": "application/json", "Content-Length": str(len(payload))}
-        response = urequests.post(webhook_url, data=payload, headers=headers, timeout=10)
-        detail = ""
-        if response.status_code not in (200, 204):
+        threshold = getattr(gc, "threshold", None)
+        if threshold:
             try:
-                raw = getattr(response, "raw", None)
-                if raw:
-                    data = raw.read(160)
-                    if data:
-                        detail = data.decode() if hasattr(data, "decode") else str(data)
+                old_threshold = threshold()
+            except TypeError:
+                pass
+            threshold(DISCORD_GC_THRESHOLD)
+        gc.collect()
+        parts = webhook_url.split("/", 3)
+        if len(parts) != 4 or parts[0] != "https:":
+            raise ValueError("Discord webhook URL must use https.")
+        host = parts[2]
+        path = "/" + parts[3]
+        addr_info = socket.getaddrinfo(host, 443, 0, socket.SOCK_STREAM)[0]
+        address = addr_info[-1]
+
+        raw_socket = socket.socket(addr_info[0], addr_info[1], addr_info[2])
+        raw_socket.settimeout(10)
+        raw_socket.connect(address)
+        tls_socket = ssl.wrap_socket(raw_socket, server_hostname=host)
+        raw_socket = None
+
+        headers = (
+            "POST {} HTTP/1.1\r\n"
+            "Host: {}\r\n"
+            "Content-Type: application/json\r\n"
+            "Content-Length: {}\r\n"
+            "Connection: close\r\n\r\n"
+        ).format(path, host, len(payload)).encode()
+        _write_all(tls_socket, headers)
+        _write_all(tls_socket, payload)
+
+        status_line = tls_socket.readline(64)
+        status_parts = status_line.split()
+        if len(status_parts) < 2:
+            raise OSError("Invalid Discord response.")
+        status_code = int(status_parts[1])
+        detail = ""
+        if status_code not in (200, 204):
+            try:
+                data = tls_socket.read(160)
+                if data:
+                    detail = data.decode() if hasattr(data, "decode") else str(data)
             except Exception:
                 detail = ""
             if detail and len(detail) > 120:
                 detail = detail[:120] + "..."
-        return response.status_code, detail
+        return status_code, detail
     finally:
-        if response:
+        if tls_socket:
             try:
-                response.close()
+                tls_socket.close()
             except:
                 pass
-        response = None
+        if raw_socket:
+            try:
+                raw_socket.close()
+            except:
+                pass
+        threshold = getattr(gc, "threshold", None)
+        if threshold and old_threshold is not None:
+            threshold(old_threshold)
+        tls_socket = None
+        raw_socket = None
         gc.collect()
 
 
