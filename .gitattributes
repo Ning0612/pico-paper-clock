@@ -1,0 +1,2 @@
+# Generated device web assets are byte-exact; preserve HTTP header CRLF.
+src/html/*.bin binary
