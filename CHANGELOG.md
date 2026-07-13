@@ -7,6 +7,11 @@
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-07-13
+
+- 修正 v3 外殼 STL Release asset，確保附件與 Git 歷史中追蹤的 `hardware/clock_v3.STL` 完全一致。
+- 同步 Release asset 文件中的檔名、SHA-256 與下載連結。
+
 ## [2.1.0] - 2026-07-13
 
 本版本發布目前 `Unreleased` 中的功能、穩定性修正與主機端圖片工具；UF2 與 v3 外殼的 STEP、STL、SLDPRT 檔案改由 GitHub Release assets 提供。

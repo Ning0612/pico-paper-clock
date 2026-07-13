@@ -9,7 +9,7 @@
 | `pico-paper-clock-v3-case.step` | 3D 外殼 v3 跨 CAD 編輯格式（通常相容性較佳） | `B7944ACD80E12A1994B8FEF3095A4F0243009CB6D9F242BA05F93782E54D6B6E` |
 | `pico-paper-clock-v3-case.stl` | 3D 外殼 v3 列印／切片網格 | `4F5417BE263C1B98F8B7706EE529E4FB1154C11D15F5A0BFEFF1943EA877FC01` |
 
-使用者可從 [v2.1.0 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.1.0) 下載這些 release assets；UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
+使用者可從 [v2.1.1 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.1.1) 下載這些 release assets；UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
 
 ## CAD 格式建議
 
