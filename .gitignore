@@ -26,3 +26,7 @@ __pycache__
 .pytest_cache/
 build/
 dist/
+
+# Large distribution-only binaries belong in GitHub Release assets.
+firmware/*.uf2
+hardware/*.SLDPRT

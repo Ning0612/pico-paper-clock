@@ -16,6 +16,7 @@
 - AP/LAN Web server 共用同一 dispatcher；設定頁改用靜態 HTML 與版本化設定 API。
 - 顯示改為單一 native framebuffer、逐列圖片讀取與批次 SPI 傳輸。
 - 設定保存改為 schema v3 單次交易，presence pending queue 改為串流處理。
+- 大型 UF2 與 SolidWorks `.SLDPRT` 檔案移出 source tree，改由 GitHub Release assets 發布。
 
 ### Fixed
 - `image_interval_min` 現在實際控制輪播間隔，日期事件圖片會依生日、MMDD、custom 優先序顯示。

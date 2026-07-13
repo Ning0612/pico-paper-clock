@@ -47,7 +47,7 @@
 5.  **無源蜂鳴器 (Passive Buzzer)** - 連接至 Pico w 的 Pin 20，用於定時響聲功能。
 6.  **電子紙模組內建按鈕** - 專案使用的三顆按鈕是電子紙顯示器模組提供的，分別連接於 Pin 2, Pin 3 和 Pin 15。
 7.  **連接線與麵包板** - 或直接焊接在 Pico w 板子上。
-7.  **(選用) 3D 列印外殼**：`hardware/` 目錄中提供了 3D 外殼的 `.SLDPRT` 檔案，可自行列印使用。
+7.  **(選用) 3D 列印外殼**：外殼的 SolidWorks `.SLDPRT` 檔案隨 GitHub Release 提供，下載方式請見 [`docs/RELEASE_ASSETS.md`](docs/RELEASE_ASSETS.md)。
 
 ---
 
@@ -149,6 +149,7 @@ pip install -r requirements.txt
 ### 1. 安裝 MicroPython 韌體
 
 - 前往 [MicroPython 官網](https://micropython.org/download/RPI_PICO_W/) 下載最新的 `.uf2` 韌體檔案。
+- 對應版本發布後，也可以從本專案的 [GitHub Releases](https://github.com/Ning0612/pico-paper-clock/releases) 下載經專案驗證的版本。
 - 按住 Raspberry Pi Pico W 上的 `BOOTSEL` 按鈕，同時將其連接到電腦。
 - 電腦會將 Pico 識別為一個名為 `RPI-RP2` 的隨身碟。
 - 將下載的 `.uf2` 韌體檔案拖曳至此隨身碟中，Pico 將自動更新並重新啟動。
@@ -367,7 +368,8 @@ CLI 範例：
 - `src/wifi_manager.py`: Wi-Fi 連線與 AP 模式管理，包含 Web 設定介面，用於使用者配置 Wi-Fi 和其他參數。
 - `src/image/`: 存放所有 `.bin` 圖片資源。
 - `tools/image_to_bin.py`: 相容的 GUI 入口；`tools/pico_image_tool/` 是共用轉檔、網路 client、GUI 與 CLI 核心。
-- `hardware/`: 硬體相關的 CAD 檔案。
+- `hardware/`: 可提交於 source tree 的硬體檔案（大型 SolidWorks `.SLDPRT` 檔案改由 [GitHub Releases](https://github.com/Ning0612/pico-paper-clock/releases) 提供）。
+- `docs/RELEASE_ASSETS.md`: UF2 與 CAD release asset 的檔名、位置與發布檢查表。
 - `upload.py`: 用於部署檔案至 Pico 的腳本。
 
 ---
