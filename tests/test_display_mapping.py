@@ -64,12 +64,14 @@ class DisplayMappingTests(unittest.TestCase):
             self.assertEqual(white, [0, 2])
 
     def test_existing_unmarked_asset_keeps_legacy_msb_left_order(self):
-        asset = Path(__file__).resolve().parents[1] / "src" / "image" / "custom" / "Gura_a.bin"
-        canvas = LogicalCanvas()
-        self.module.draw_image(canvas, str(asset), 128, 128, 0, 0)
-        data = asset.read_bytes()
-        expected_first_row = [1 if data[x // 8] & (1 << (7 - x % 8)) else 0 for x in range(128)]
-        self.assertEqual([canvas.pixels[(x, 0)] for x in range(128)], expected_first_row)
+        with tempfile.TemporaryDirectory() as temp:
+            asset = Path(temp) / "legacy.bin"
+            asset.write_bytes(bytes(index % 256 for index in range(2048)))
+            canvas = LogicalCanvas()
+            self.module.draw_image(canvas, str(asset), 128, 128, 0, 0)
+            data = asset.read_bytes()
+            expected_first_row = [1 if data[x // 8] & (1 << (7 - x % 8)) else 0 for x in range(128)]
+            self.assertEqual([canvas.pixels[(x, 0)] for x in range(128)], expected_first_row)
 
 
 if __name__ == "__main__":
