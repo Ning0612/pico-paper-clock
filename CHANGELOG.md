@@ -16,11 +16,15 @@
 - AP/LAN Web server 共用同一 dispatcher；設定頁改用靜態 HTML 與版本化設定 API。
 - 顯示改為單一 native framebuffer、逐列圖片讀取與批次 SPI 傳輸。
 - 設定保存改為 schema v3 單次交易，presence pending queue 改為串流處理。
+- 啟動網路流程改為先完成 Discord webhook，再載入顯示、硬體、天氣與 controller 工作路徑，降低 Pico W TLS 的記憶體配置峰值。
+- Discord webhook 改用低配置 raw HTTPS socket，並在 partial write、socket close、GC 與 ENOMEM retry 上加入防護。
+- DHT22 讀取加入 2500 ms 節流、失敗 10 秒 backoff 與舊值快取；天氣預報改用 256-byte buffer 和 `readinto()` 串流解析。
 - 大型 UF2 與 SolidWorks `.SLDPRT` 檔案移出 source tree，改由 GitHub Release assets 發布。
 
 ### Fixed
 - `image_interval_min` 現在實際控制輪播間隔，日期事件圖片會依生日、MMDD、custom 優先序顯示。
 - MONO_HLSB 明確採 bit 0 為左側像素，避免每 8 像素位元順序錯誤。
+- 修復 Pico W 在 Discord webhook 與 presence 發送時的 `ENOMEM`：失敗不再中止啟動流程或永久丟棄 pending presence，並可在冷卻後重試。
 
 ## [2.0.1] - 2025-12-31
 

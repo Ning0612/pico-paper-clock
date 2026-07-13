@@ -53,6 +53,16 @@ OpenWeatherMap API 金鑰（所有設定檔共用同一個 API Key）
 |------|------|----------|
 | String | OpenWeatherMap API 金鑰 | [https://openweathermap.org/api](https://openweathermap.org/api) |
 
+#### 其他全域設定
+
+| 欄位 | 用途 | 注意事項 |
+|---|---|---|
+| `global.discord_webhook_url` | 選用的 Discord 在席通知 webhook | 視為 secret；留空可停用通知 |
+| `global.lan_admin.username` | LAN 設定／圖片管理的 Basic Auth 使用者 | 建議部署後修改預設值 |
+| `global.lan_admin.password` | LAN 設定／圖片管理的 Basic Auth 密碼 | 不要提交真實密碼 |
+
+Web UI 對 secret 欄位只顯示「已設定」狀態；留白保存時會保留原值。LAN 設定與圖片 API 的認證細節請見 [`IMAGE_API.md`](IMAGE_API.md)。
+
 ---
 
 ### 2. Profiles 設定（設定檔陣列）
@@ -148,7 +158,7 @@ WiFi 連線設定
 
 ### 方法 1：透過網頁介面管理（推薦）
 
-1. 長按時鐘上的按鈕 5 秒
+1. 長按時鐘上的任一按鈕約 3 秒
 2. 系統會重啟並進入 AP Mode
 3. 連接到 WiFi：`Pi_Clock_AP`（或你設定的 AP SSID）
 4. 開啟瀏覽器，前往 `192.168.4.1`

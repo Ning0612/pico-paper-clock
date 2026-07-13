@@ -12,7 +12,7 @@ main.py
        └─ LanConfigServer / AP web server → wifi_manager dispatcher
 ```
 
-啟動時先復原設定與圖片交易檔，再建立顯示與網路服務。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
+啟動時先復原圖片交易檔，再連線並嘗試發送 Discord LAN IP 通知；通知完成後才載入控制器、顯示與感測器工作路徑，最後建立 LAN server。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
 
 ## 記憶體邊界
 
@@ -20,7 +20,27 @@ main.py
 - 圖片以固定列 buffer 讀取；網路上傳以 512-byte buffer 串流，不把整張圖片載入 RAM。
 - SPI 傳送使用 buffer write，避免逐 byte 建立暫時物件。
 - 長生命週期 controller、presence、image store/catalog 使用 `__slots__`。
+- Discord webhook 不使用 `urequests.Response` 路徑，改用 raw `ssl` socket：只建立固定大小的 HTTP headers/payload、處理 partial write、讀取 status line 後立即關閉 socket；送出前後執行 `gc.collect()`，並暫時調整 GC threshold 後恢復原值。
+- 啟動通知在 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試。
+- Discord `ENOMEM` 會回傳可重試結果；presence queue 在記憶體壓力後暫停一個 flush interval，之後自動恢復嘗試，不丟棄 pending session/summary。
+- DHT22 使用 2500 ms 最小讀取間隔；讀取失敗改用 10 秒 backoff，保留上一筆快取值，避免感測器錯誤反覆消耗 heap 與刷 serial log。
+- 天氣預報使用 256-byte 固定串流 buffer 與 `readinto()`，逐筆解析 forecast entry；response、entry 暫存物件在處理後釋放並回收，避免一次載入完整 JSON 文件。
 - `/api/v1/device` 的 `heap_free` 可作為現場基線；完整 peak／長跑數據仍需接上指定 Pico 後量測。
+
+### 記憶體問題的處理原則
+
+```text
+啟動 Wi-Fi
+  └─ raw HTTPS Discord webhook
+       ├─ 成功：記錄已送出，釋放 socket
+       └─ ENOMEM：保留可重試狀態，不阻塞主迴圈
+            ↓
+載入 display / HardwareManager / AppController
+  └─ 天氣 forecast 以固定 buffer 串流解析
+  └─ DHT22 依時間節流，失敗使用 backoff 與快取
+```
+
+這些策略的目標是降低「單次配置峰值」與重複配置頻率，而不是宣稱裝置 heap 永遠不會耗盡。現場診斷應同時查看 serial 的 `ENOMEM`、`Memory available after request`、DHT22 錯誤與 `/api/v1/device` 的 `heap_free`。
 
 ## 圖片格式與相容性
 
@@ -58,5 +78,7 @@ main.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
 .\.venv\Scripts\python.exe upload.py --port COM6 --no-clean
 ```
+
+本次記憶體路徑的最低驗證包括 26 個 host tests、`compileall`、`git diff --check`，以及 Pico W serial 中的 `Success: Discord LAN IP notification sent.`、DHT22 讀值與天氣請求成功。完整 peak heap 仍應以實際硬體長跑資料為準。
 
 桌面 EXE 由 `tools/build_image_tool.ps1` 建置。若使用 `--recursive-clean`，部署前要先保存裝置上只有 runtime 的圖片。
