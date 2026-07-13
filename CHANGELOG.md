@@ -23,7 +23,7 @@
 - 啟動網路流程改為先完成 Discord webhook，再載入顯示、硬體、天氣與 controller 工作路徑，降低 Pico W TLS 的記憶體配置峰值。
 - Discord webhook 改用低配置 raw HTTPS socket，並在 partial write、socket close、GC 與 ENOMEM retry 上加入防護。
 - DHT22 讀取加入 2500 ms 節流、失敗 10 秒 backoff 與舊值快取；天氣預報改用 256-byte buffer 和 `readinto()` 串流解析。
-- 大型 UF2 與 SolidWorks `.SLDPRT` 檔案移出 source tree，改由 GitHub Release assets 發布。
+- 大型 UF2 與 CAD（`.SLDPRT`、`.step`、`.stl`）檔案移出 source tree，改由 GitHub Release assets 發布。
 
 ### Fixed
 - `image_interval_min` 現在實際控制輪播間隔，日期事件圖片會依生日、MMDD、custom 優先序顯示。

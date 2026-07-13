@@ -6,14 +6,14 @@
 |---|---|---|
 | `pico-paper-clock-micropython-1.24.1.uf2` | 專案驗證過的 Pico W MicroPython 韌體 | `BF869821B59A13DE3F7FA0C3CC1592F9AF4BD41CE571D919C2577D47B6CE540E` |
 | `pico-paper-clock-v3-case.SLDPRT` | 3D 外殼 v3 SolidWorks 原始檔 | `825F8771BFB83B546339FB9DD2A3BECAF4726A15A73193B73C40BA8F4E62ECCB` |
-| `pico-paper-clock-v3-case.step` | 3D 外殼 v3 跨 CAD 編輯格式（首選） | `B7944ACD80E12A1994B8FEF3095A4F0243009CB6D9F242BA05F93782E54D6B6E` |
-| `pico-paper-clock-v3-case.stl` | 3D 外殼 v3 列印／切片網格 | `5FEB11A40620E74B4B240A42A69FD7A65A0FCAF5F106EEFD21F2F0F192C7397C` |
+| `pico-paper-clock-v3-case.step` | 3D 外殼 v3 跨 CAD 編輯格式（通常相容性較佳） | `B7944ACD80E12A1994B8FEF3095A4F0243009CB6D9F242BA05F93782E54D6B6E` |
+| `pico-paper-clock-v3-case.stl` | 3D 外殼 v3 列印／切片網格 | `4F5417BE263C1B98F8B7706EE529E4FB1154C11D15F5A0BFEFF1943EA877FC01` |
 
-對應 Release 建立並發布後，使用者可從 [GitHub Releases](https://github.com/Ning0612/pico-paper-clock/releases) 下載 release assets；UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
+使用者可從 [v2.1.0 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.1.0) 下載這些 release assets；UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
 
 ## CAD 格式建議
 
-- 一般 CAD 使用者優先下載 `.step`，相容性與可編輯性最佳。
+- 一般 CAD 使用者優先下載 `.step`，通常能在不同 CAD 工具間保留較好的可編輯幾何。
 - 要直接列印時下載 `.stl`，它是已離散化的三角網格，不適合精確修改尺寸。
 - 使用 SolidWorks 且需要原生特徵樹時才下載 `.SLDPRT`。
 - 三種 CAD 檔都只放在 Release assets；source tree 不保留大型發行檔。
