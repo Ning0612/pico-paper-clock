@@ -927,25 +927,34 @@ def _presence_epoch(date_value, time_value):
 
 def _send_presence_lines(cl, kind):
     manager = get_presence_manager()
-    cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n[")
+    response_buffer = bytearray(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n[")
     if manager:
         path = "presence_daily.log" if kind == "daily" else "presence_events.log"
         first = True
         for line in iter_lines(path):
-            parts = line.split(",")
-            if kind == "daily" and len(parts) >= 3:
-                item = '{{"d":"{}","sec":{},"n":{}}}'.format(parts[0], int(parts[1]), int(parts[2]))
-            elif kind == "events" and len(parts) >= 4:
-                item = '{{"d":"{}","t":"{}","s":{},"a":{},"e":{}}}'.format(
-                    parts[0], parts[1], int(parts[2]), int(parts[3]), _presence_epoch(parts[0], parts[1])
-                )
-            else:
+            try:
+                parts = line.split(",")
+                if kind == "daily" and len(parts) >= 3:
+                    item = '{{"d":"{}","sec":{},"n":{}}}'.format(parts[0], int(parts[1]), int(parts[2]))
+                elif kind == "events" and len(parts) >= 4:
+                    item = '{{"d":"{}","t":"{}","s":{},"a":{},"e":{}}}'.format(
+                        parts[0], parts[1], int(parts[2]), int(parts[3]), _presence_epoch(parts[0], parts[1])
+                    )
+                else:
+                    continue
+            except (ValueError, TypeError, IndexError):
+                print("Warning: Skipping malformed presence {} line.".format(kind))
                 continue
             if not first:
-                cl.send(b",")
-            cl.send(item.encode())
+                response_buffer.extend(b",")
+            response_buffer.extend(item.encode())
+            if len(response_buffer) >= 512:
+                send_chunk(cl, response_buffer)
+                response_buffer = bytearray()
             first = False
-    cl.send(b"]")
+    response_buffer.extend(b"]")
+    if response_buffer:
+        send_chunk(cl, response_buffer)
 
 
 def _send_presence_dashboard(cl):

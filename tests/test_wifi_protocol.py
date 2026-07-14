@@ -274,6 +274,25 @@ class WifiProtocolTests(unittest.TestCase):
         self.assertTrue(self.module._handle_image_api(client, request, require_auth=False))
         self.assertIn(b"401 Unauthorized", bytes(client.sent))
 
+    def test_presence_stream_skips_malformed_lines(self):
+        original_manager = self.module.get_presence_manager
+        original_iter_lines = self.module.iter_lines
+        try:
+            self.module.get_presence_manager = lambda: object()
+            self.module.iter_lines = lambda _path: iter((
+                "malformed-event",
+                "20260714,123000,1,321",
+            ))
+            client = FakeClient()
+            self.module._send_presence_lines(client, "events")
+            response = bytes(client.sent)
+            self.assertIn(b"200 OK", response)
+            self.assertIn(b'"d":"20260714"', response)
+            self.assertTrue(response.endswith(b"]"))
+        finally:
+            self.module.get_presence_manager = original_manager
+            self.module.iter_lines = original_iter_lines
+
 
 if __name__ == "__main__":
     unittest.main()
