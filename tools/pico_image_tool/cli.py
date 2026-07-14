@@ -38,7 +38,7 @@ def _add_conversion_options(parser):
 def _add_device_options(parser):
     parser.add_argument("--device", required=True, help="Device IPv4 address or HTTP host.")
     parser.add_argument("--username", default="admin")
-    parser.add_argument("--password", default="admin")
+    parser.add_argument("--password", default="")
     parser.add_argument("--timeout", type=float, default=15.0, help="HTTP timeout in seconds.")
     parser.add_argument("--event", help="MMDD or birthday when --type events is selected.")
 

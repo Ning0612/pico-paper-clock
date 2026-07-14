@@ -1,4 +1,3 @@
-import base64
 import concurrent.futures
 import http.client
 import ipaddress
@@ -38,17 +37,83 @@ def _base_host(value: str) -> str:
 
 
 class DeviceClient:
-    def __init__(self, host: str, username: str = "admin", password: str = "admin", timeout: float = 15.0):
+    def __init__(self, host: str, username: str = "admin", password: str = "", timeout: float = 15.0):
         self.host = _base_host(host)
+        self.username = username
+        self.password = password
         self.timeout = timeout
-        token = base64.b64encode(f"{username}:{password}".encode("utf-8")).decode("ascii")
-        self.authorization = "Basic " + token
+        self.session_cookie = None
+        self.csrf_token = None
 
     def _connection(self) -> http.client.HTTPConnection:
         return http.client.HTTPConnection(self.host, timeout=self.timeout)
 
+    @staticmethod
+    def _json_response(response):
+        raw = response.read()
+        try:
+            value = json.loads(raw.decode("utf-8")) if raw else {}
+        except (UnicodeError, json.JSONDecodeError):
+            value = {}
+        return value
+
+    def _login(self):
+        connection = self._connection()
+        try:
+            connection.request("GET", "/api/v1/auth/status")
+            status_response = connection.getresponse()
+            status = self._json_response(status_response)
+            if status_response.status >= 400:
+                raise DeviceError(status.get("message", "Unable to read device auth status."), status_response.status)
+            if status.get("setup_required"):
+                raise DeviceError("Complete first-time WebUI password setup before using the image tool.", 409, "setup_required")
+            csrf = status.get("csrf_token")
+            if not csrf:
+                raise DeviceError("Device did not provide a pre-auth CSRF token.")
+        finally:
+            connection.close()
+
+        body = urlencode({
+            "username": self.username,
+            "password": self.password,
+            "password_confirm": self.password,
+            "csrf_token": csrf,
+        }).encode("utf-8")
+        connection = self._connection()
+        try:
+            connection.request(
+                "POST",
+                "/api/v1/auth/login",
+                body=body,
+                headers={
+                    "Content-Type": "application/x-www-form-urlencoded",
+                    "Content-Length": str(len(body)),
+                    "Accept": "application/json",
+                },
+            )
+            response = connection.getresponse()
+            value = self._json_response(response)
+            if response.status >= 400:
+                raise DeviceError(value.get("message", f"Login failed with HTTP {response.status}."), response.status, value.get("error"))
+            cookie = response.getheader("Set-Cookie", "")
+            self.session_cookie = cookie.split(";", 1)[0] if cookie else None
+            self.csrf_token = value.get("csrf_token")
+            if not self.session_cookie or not self.csrf_token:
+                raise DeviceError("Device login did not return a session cookie and CSRF token.")
+        finally:
+            connection.close()
+
+    def _ensure_session(self):
+        if not self.session_cookie or not self.csrf_token:
+            self._login()
+
     def _request(self, method: str, path: str, body: bytes | None = None, mutate: bool = False):
-        headers = {"Authorization": self.authorization, "Accept": "application/json"}
+        self._ensure_session()
+        headers = {
+            "Cookie": self.session_cookie,
+            "X-CSRF-Token": self.csrf_token,
+            "Accept": "application/json",
+        }
         if mutate:
             headers["X-Pico-Clock-API"] = "1"
         if body is not None:
@@ -58,11 +123,7 @@ class DeviceClient:
         try:
             connection.request(method, path, body=body, headers=headers)
             response = connection.getresponse()
-            raw = response.read()
-            try:
-                value = json.loads(raw.decode("utf-8")) if raw else {}
-            except (UnicodeError, json.JSONDecodeError):
-                value = {}
+            value = self._json_response(response)
             if response.status >= 400:
                 raise DeviceError(value.get("message", f"Device returned HTTP {response.status}."), response.status, value.get("error"))
             return value
@@ -106,9 +167,11 @@ class DeviceClient:
                progress: Callable[[int, int], None] | None = None):
         resource = self._resource(collection, filename, event)
         resource += "?" + urlencode({"overwrite": int(overwrite), "preview": int(preview)})
+        self._ensure_session()
         connection = self._connection()
         headers = {
-            "Authorization": self.authorization,
+            "Cookie": self.session_cookie,
+            "X-CSRF-Token": self.csrf_token,
             "X-Pico-Clock-API": "1",
             "Content-Type": "application/octet-stream",
             "Content-Length": str(len(data)),
@@ -127,8 +190,7 @@ class DeviceClient:
                 if progress:
                     progress(sent, len(data))
             response = connection.getresponse()
-            raw = response.read()
-            value = json.loads(raw.decode("utf-8")) if raw else {}
+            value = self._json_response(response)
             if response.status >= 400:
                 raise DeviceError(value.get("message", f"Upload failed with HTTP {response.status}."), response.status, value.get("error"))
             return value

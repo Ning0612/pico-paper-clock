@@ -4,6 +4,8 @@ import socket
 import time
 import machine
 import gc
+import hashlib
+import os
 import ujson
 import ubinascii
 from display_manager import update_display_Restart, update_display_AP
@@ -19,6 +21,26 @@ _REBOOT_REQUESTED = False
 # span several seconds; keep a finite slow-client deadline without rejecting it.
 REQUEST_READ_DEADLINE_MS = 8000
 _REQUEST_DEADLINE = None
+
+SESSION_COOKIE_NAME = "pico_clock_session_v1"
+SESSION_IDLE_TIMEOUT_MS = 30 * 60 * 1000
+SESSION_ABSOLUTE_TIMEOUT_MS = 24 * 60 * 60 * 1000
+LOGIN_FAILURE_WINDOW_MS = 5 * 60 * 1000
+LOGIN_FAILURE_LIMIT = 10
+MAX_LOGIN_FAILURE_KEYS = 16
+PASSWORD_MIN_LENGTH = 8
+FIXED_ADMIN_USERNAME = "admin"
+PBKDF2_TARGET_MS = 250
+PBKDF2_PROBE_ITERATIONS = 64
+PBKDF2_MIN_ITERATIONS = 64
+PBKDF2_MAX_ITERATIONS = 65535
+
+_CURRENT_SESSION_TOKEN = None
+_SESSION_START_MS = None
+_SESSION_LAST_ACTIVITY_MS = None
+_SESSION_CSRF_TOKEN = None
+_LOGIN_FAILURES = {}
+_RESET_FAILURES = {}
 
 
 def _ticks_add(value, delta):
@@ -61,38 +83,201 @@ class _DeadlineStream:
         except TypeError:
             return self.stream.readinto(memoryview(buffer)[:length])
 
-# Phase 3: CSRF 防護 - 全域 Token (啟動時生成)
-# 使用時間戳 + ADC 噪音生成隨機 token (MicroPython 相容)
-def _generate_csrf_token():
-    """Generates a simple CSRF token using timestamp and ADC noise."""
-    try:
-        # 使用 ADC 讀取（電磁噪音）和時間戳生成隨機性
-        adc = machine.ADC(machine.Pin(26))
-        noise = adc.read_u16()
-        timestamp = time.ticks_ms()
-        # 組合生成 token (16進位字串)
-        token_value = (timestamp * 31 + noise) & 0xFFFFFFFF
-        return hex(token_value)[2:]  # 移除 '0x' 前綴
-    except:
-        # 降級方案：僅使用時間戳
-        return hex(time.ticks_ms() & 0xFFFFFFFF)[2:]
+def _random_token(byte_count=16):
+    """Returns a CSPRNG-backed opaque token; never falls back to a clock."""
+    return ubinascii.hexlify(os.urandom(byte_count)).decode()
 
-CSRF_TOKEN = _generate_csrf_token()
+
+def _constant_time_equal(left, right):
+    """Compares text/bytes without a length-dependent early exit."""
+    if isinstance(left, str):
+        left = left.encode("utf-8")
+    if isinstance(right, str):
+        right = right.encode("utf-8")
+    if left is None:
+        left = b""
+    if right is None:
+        right = b""
+    size = max(len(left), len(right))
+    difference = len(left) ^ len(right)
+    for index in range(size):
+        left_byte = left[index] if index < len(left) else 0
+        right_byte = right[index] if index < len(right) else 0
+        difference |= left_byte ^ right_byte
+    return difference == 0
+
+
+def _hmac_sha256(key, value):
+    if not isinstance(key, (bytes, bytearray)):
+        key = key.encode("utf-8")
+    if len(key) > 64:
+        key = hashlib.sha256(key).digest()
+    inner = bytearray(64)
+    outer = bytearray(64)
+    for index in range(64):
+        byte = key[index] if index < len(key) else 0
+        inner[index] = byte ^ 0x36
+        outer[index] = byte ^ 0x5C
+    digest = hashlib.sha256()
+    digest.update(inner)
+    digest.update(value)
+    inner_digest = digest.digest()
+    digest = hashlib.sha256()
+    digest.update(outer)
+    digest.update(inner_digest)
+    return digest.digest()
+
+
+def _pbkdf2_sha256(password, salt, iterations):
+    if isinstance(password, str):
+        password = password.encode("utf-8")
+    block = salt + bytes((0, 0, 0, 1))
+    current = _hmac_sha256(password, block)
+    result = bytearray(current)
+    for _ in range(1, iterations):
+        current = _hmac_sha256(password, current)
+        for index in range(len(result)):
+            result[index] ^= current[index]
+    return bytes(result)
+
+
+def _calibrate_pbkdf2_iterations():
+    """Selects a device-specific cost in the documented 100-500 ms range."""
+    salt = os.urandom(16)
+    started = _request_now_ms()
+    _pbkdf2_sha256("calibration", salt, PBKDF2_PROBE_ITERATIONS)
+    elapsed = max(1, _ticks_diff(_request_now_ms(), started))
+    estimate = int(PBKDF2_PROBE_ITERATIONS * PBKDF2_TARGET_MS / elapsed)
+    return min(PBKDF2_MAX_ITERATIONS, max(PBKDF2_MIN_ITERATIONS, estimate))
+
+
+def _password_hash(password):
+    salt = os.urandom(16)
+    iterations = _calibrate_pbkdf2_iterations()
+    derived = _pbkdf2_sha256(password, salt, iterations)
+    return "pbkdf2-sha256${}${}${}".format(
+        iterations,
+        ubinascii.hexlify(salt).decode(),
+        ubinascii.hexlify(derived).decode(),
+    )
+
+
+def _password_matches(password, record):
+    if not isinstance(record, str) or not record:
+        return False
+    if not record.startswith("pbkdf2-sha256$"):
+        return _constant_time_equal(password, record)
+    parts = record.split("$")
+    if len(parts) != 4:
+        return False
+    try:
+        iterations = int(parts[1])
+        if iterations < PBKDF2_MIN_ITERATIONS or iterations > PBKDF2_MAX_ITERATIONS:
+            return False
+        salt = ubinascii.unhexlify(parts[2].encode())
+        expected = ubinascii.unhexlify(parts[3].encode())
+    except (ValueError, TypeError):
+        return False
+    actual = _pbkdf2_sha256(password, salt, iterations)
+    return _constant_time_equal(actual, expected)
+
+
+def _admin_username():
+    return FIXED_ADMIN_USERNAME
+
+
+def _admin_password_record():
+    return config_manager.get_global("lan_admin.password", "") or ""
+
+
+def _admin_password_configured():
+    return bool(_admin_password_record())
+
+
+def _migrate_legacy_password():
+    """Upgrade pre-session plaintext records when the config API supports writes."""
+    record = _admin_password_record()
+    if not record or record.startswith("pbkdf2-sha256$"):
+        return
+    if getattr(config_manager, "read_only", False) or not hasattr(config_manager, "set_global"):
+        return
+    try:
+        config_manager.set_global("lan_admin.password", _password_hash(record))
+        print("Info: Migrated LAN admin password to PBKDF2-HMAC-SHA256.")
+    except Exception as exc:
+        print("Warning: LAN admin password migration deferred: {}".format(exc))
+
+
+def _clear_session():
+    global _CURRENT_SESSION_TOKEN, _SESSION_START_MS
+    global _SESSION_LAST_ACTIVITY_MS, _SESSION_CSRF_TOKEN
+    _CURRENT_SESSION_TOKEN = None
+    _SESSION_START_MS = None
+    _SESSION_LAST_ACTIVITY_MS = None
+    _SESSION_CSRF_TOKEN = None
+
+
+def _start_session():
+    global _CURRENT_SESSION_TOKEN, _SESSION_START_MS
+    global _SESSION_LAST_ACTIVITY_MS, _SESSION_CSRF_TOKEN
+    now = _request_now_ms()
+    _CURRENT_SESSION_TOKEN = _random_token(16)
+    _SESSION_CSRF_TOKEN = _random_token(16)
+    _SESSION_START_MS = now
+    _SESSION_LAST_ACTIVITY_MS = now
+    return _CURRENT_SESSION_TOKEN, _SESSION_CSRF_TOKEN
+
+
+def _cookie_value(request, name):
+    cookie_header = _request_headers(request).get("cookie", "")
+    for item in cookie_header.split(";"):
+        if "=" not in item:
+            continue
+        key, value = item.strip().split("=", 1)
+        if key == name:
+            return value
+    return ""
+
+
+def _session_authorized(request, touch=True):
+    global _SESSION_LAST_ACTIVITY_MS
+    if _CURRENT_SESSION_TOKEN is None or _SESSION_CSRF_TOKEN is None:
+        return False
+    token = _cookie_value(request, SESSION_COOKIE_NAME)
+    if not _constant_time_equal(token, _CURRENT_SESSION_TOKEN):
+        return False
+    now = _request_now_ms()
+    if _ticks_diff(now, _SESSION_START_MS) > SESSION_ABSOLUTE_TIMEOUT_MS:
+        _clear_session()
+        return False
+    if _ticks_diff(now, _SESSION_LAST_ACTIVITY_MS) > SESSION_IDLE_TIMEOUT_MS:
+        _clear_session()
+        return False
+    if touch:
+        _SESSION_LAST_ACTIVITY_MS = now
+    return True
+
+
+def _request_csrf_valid(request, params=None):
+    if not _session_authorized(request):
+        return False
+    params = params or {}
+    headers = _request_headers(request)
+    token = headers.get("x-csrf-token") or params.get("csrf_token", "")
+    return _constant_time_equal(token, _SESSION_CSRF_TOKEN)
+
 
 def verify_csrf_token(params):
-    """Verifies CSRF token from request parameters.
-
-    Args:
-        params: Dictionary of request parameters
-
-    Returns:
-        bool: True if token is valid, False otherwise
-    """
+    """Verifies the per-process pre-auth CSRF token."""
     token = params.get("csrf_token", "")
-    is_valid = token == CSRF_TOKEN
+    is_valid = _constant_time_equal(token, CSRF_TOKEN)
     if not is_valid:
         print("CSRF validation failed.")
     return is_valid
+
+
+CSRF_TOKEN = _random_token(16)
+_migrate_legacy_password()
 
 def reset_wifi_and_reboot():
     """Sets force AP mode flag and reboots to enter configuration mode."""
@@ -122,6 +307,7 @@ def factory_reset():
     # Reinitialize config manager with defaults
     config_manager.config = config_manager._get_default_config()
     config_manager._save_config()
+    _clear_session()
 
     print("Factory reset complete. Default configuration restored.")
     return True
@@ -214,12 +400,6 @@ def scan_networks():
 
     return [{"ssid": ssid, "rssi": rssi} for ssid, rssi in unique_networks.items()]
 
-
-HTML_ERROR_PAGE_PREFIX = "HTTP/1.0 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><head><meta charset=\"utf-8\"><title>錯誤</title></head><body><h1>儲存失敗</h1><p>".encode("utf-8")
-HTML_ERROR_PAGE_SUFFIX = "</p><a href=\"/\">返回</a></body></html>".encode("utf-8")
-
-HTML_RESET_ERROR_PREFIX = "HTTP/1.0 500 Internal Server Error\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<html><head><meta charset=\"utf-8\"><title>錯誤</title></head><body><h1>重置失敗</h1><p>".encode("utf-8")
-HTML_RESET_ERROR_SUFFIX = "</p><a href=\"/\">返回</a></body></html>".encode("utf-8")
 
 def _send_file_chunks(cl, path):
     try:
@@ -344,7 +524,7 @@ def _config_payload(profile_name=None):
         "chime": profile.get("chime", {}) if profile else {},
     }
     return {
-        "csrf_token": CSRF_TOKEN,
+        "csrf_token": _SESSION_CSRF_TOKEN or "",
         "profiles": config_manager.list_profiles(),
         "active_profile": config_manager.get_active_profile_name(),
         "profile": safe_profile,
@@ -352,7 +532,7 @@ def _config_payload(profile_name=None):
             "ap_mode_ssid": config_manager.get_global("ap_mode.ssid", "Pi_Clock_AP"),
             "weather_api_key_configured": bool(config_manager.get_global("weather_api_key", "")),
             "discord_webhook_configured": bool(config_manager.get_global("discord_webhook_url", "")),
-            "lan_admin_username": config_manager.get_global("lan_admin.username", "admin"),
+            "lan_admin_username": FIXED_ADMIN_USERNAME,
         },
     }
 
@@ -366,13 +546,17 @@ def _handle_config_api(cl, request, require_auth):
         _send_json_status(cl, 200, _config_payload(params.get("profile")))
         return True
     if path == "/api/v1/networks" and method == "GET":
-        _send_json_status(cl, 200, {"networks": _get_page_networks(require_auth)})
+        try:
+            _send_json_status(cl, 200, {"networks": _get_page_networks(require_auth)})
+        except Exception as exc:
+            print("Wi-Fi scan error: {}".format(exc))
+            _send_json_status(cl, 500, {"error": "scan_failed", "message": "Unable to scan Wi-Fi networks."})
         return True
     if path == "/api/v1/config" and method == "POST":
         try:
             body = _read_request_body(cl, request)
             params = parse_query_string(body)
-            if not verify_csrf_token(params):
+            if not _request_csrf_valid(request, params):
                 _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
                 return True
             _save_settings_from_params(params)
@@ -393,40 +577,181 @@ def _consume_reboot_request():
     _REBOOT_REQUESTED = False
     return requested
 
-def _expected_basic_auth_header():
-    username = config_manager.get_global("lan_admin.username", "admin") or "admin"
-    password = config_manager.get_global("lan_admin.password", "admin") or "admin"
-    token = ubinascii.b2a_base64((username + ":" + password).encode()).decode().strip()
-    return "Basic " + token
+def _reset_failure_key(client_key):
+    return "reset:" + (client_key or "unknown")
 
-def _send_auth_required(cl):
-    cl.send(b'HTTP/1.0 401 Unauthorized\r\nWWW-Authenticate: Basic realm="Pi Clock LAN Admin"\r\n\r\nUnauthorized')
+
+def _failure_is_limited(store, key, limit):
+    now = _request_now_ms()
+    values = store.get(key, [])
+    values = [value for value in values if _ticks_diff(now, value) <= LOGIN_FAILURE_WINDOW_MS]
+    store[key] = values
+    return len(values) >= limit
+
+
+def _record_failure(store, key, limit):
+    now = _request_now_ms()
+    if key not in store and len(store) >= MAX_LOGIN_FAILURE_KEYS:
+        oldest = min(store, key=lambda item: store[item][-1] if store[item] else now)
+        del store[oldest]
+    values = store.get(key, [])
+    values = [value for value in values if _ticks_diff(now, value) <= LOGIN_FAILURE_WINDOW_MS]
+    values.append(now)
+    store[key] = values[-limit:]
+
+
+def _clear_failure(store, key):
+    store.pop(key, None)
+
+
+def _set_admin_password(password):
+    if len(password) < PASSWORD_MIN_LENGTH or len(password) > 128:
+        raise ValueError("管理密碼必須為 8-128 個字元。")
+    if getattr(config_manager, "read_only", False):
+        raise ValueError("目前設定檔為唯讀，無法設定管理密碼。")
+    config_manager.set_global("lan_admin.password", _password_hash(password))
+    _clear_session()
+
+
+def _safe_redirect(value):
+    if (
+        not value or
+        not value.startswith("/") or
+        value.startswith("//") or
+        "\\" in value or
+        any(ord(char) < 32 for char in value)
+    ):
+        return "/"
+    return value
+
+
+def _session_cookie(token, clear=False):
+    if clear:
+        return "{}=; Path=/; HttpOnly; SameSite=Strict; Max-Age=0".format(SESSION_COOKIE_NAME)
+    return "{}={}; Path=/; HttpOnly; SameSite=Strict".format(SESSION_COOKIE_NAME, token)
+
 
 def _is_lan_authorized(request):
-    return _request_headers(request).get("authorization") == _expected_basic_auth_header()
+    return _session_authorized(request)
+
+
+def _auth_required_for_request(require_auth):
+    setup_complete = config_manager.get_global("setup_complete", False)
+    return require_auth or setup_complete or _admin_password_configured()
+
+
+def _request_is_api(target):
+    path = target.split("?", 1)[0]
+    return path.startswith("/api/") or path.startswith("/presence/") or path == "/adc"
+
+
+def _send_auth_required(cl, api=False):
+    if api:
+        _send_json_status(cl, 401, {"error": "auth_required", "message": "請先登入管理介面。"})
+    else:
+        send_chunk(cl, b"HTTP/1.0 302 Found\r\nLocation: /login\r\nCache-Control: no-store\r\n\r\n")
+
+
+def _handle_auth_api(cl, request, client_key):
+    method, target = _request_line(request)
+    path = target.split("?", 1)[0]
+    if path == "/api/v1/auth/status" and method == "GET":
+        _send_json_status(cl, 200, {
+            "setup_required": not _admin_password_configured(),
+            "authenticated": _session_authorized(request),
+            "username": _admin_username(),
+            "csrf_token": CSRF_TOKEN,
+        })
+        return True
+    if path == "/api/v1/auth/session" and method == "GET":
+        if not _is_lan_authorized(request):
+            _send_auth_required(cl, api=True)
+        else:
+            _send_json_status(cl, 200, {
+                "authenticated": True,
+                "username": _admin_username(),
+                "csrf_token": _SESSION_CSRF_TOKEN,
+            })
+        return True
+    if path == "/api/v1/auth/login" and method == "POST":
+        try:
+            body = _read_request_body(cl, request)
+            params = parse_query_string(body)
+        except (ValueError, TypeError) as exc:
+            _send_json_status(cl, 400, {"error": "invalid_request", "message": str(exc)})
+            return True
+        if not verify_csrf_token(params):
+            _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
+            return True
+        if _failure_is_limited(_LOGIN_FAILURES, client_key, LOGIN_FAILURE_LIMIT):
+            _send_json_status(cl, 429, {"error": "rate_limited", "message": "登入嘗試過多，請 5 分鐘後再試。"})
+            return True
+        password = params.get("password", "")
+        setup_required = not _admin_password_configured()
+        valid = False
+        try:
+            if setup_required:
+                password_confirm = params.get("password_confirm", "")
+                valid = (
+                    _constant_time_equal(password, password_confirm) and
+                    len(password) >= PASSWORD_MIN_LENGTH
+                )
+                if valid:
+                    _set_admin_password(password)
+            else:
+                valid = (
+                    _password_matches(password, _admin_password_record())
+                )
+                if valid and not _admin_password_record().startswith("pbkdf2-sha256$"):
+                    _set_admin_password(password)
+        except (ValueError, OSError) as exc:
+            _send_json_status(cl, 400, {"error": "invalid_credentials", "message": str(exc)})
+            return True
+        if not valid:
+            _record_failure(_LOGIN_FAILURES, client_key, LOGIN_FAILURE_LIMIT)
+            _send_json_status(cl, 401, {"error": "invalid_credentials", "message": "帳號或密碼不正確。"})
+            return True
+        _clear_failure(_LOGIN_FAILURES, client_key)
+        session_token, csrf_token = _start_session()
+        _send_json_status(
+            cl,
+            200,
+            {"authenticated": True, "csrf_token": csrf_token, "redirect": _safe_redirect(params.get("next"))},
+            {"Set-Cookie": _session_cookie(session_token)},
+        )
+        return True
+    if path == "/api/v1/auth/logout" and method == "POST":
+        if not _is_lan_authorized(request):
+            _send_auth_required(cl, api=True)
+            return True
+        if not _request_csrf_valid(request):
+            _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
+            return True
+        _clear_session()
+        _send_json_status(cl, 200, {"authenticated": False}, {"Set-Cookie": _session_cookie("", clear=True)})
+        return True
+    return False
 
 def _get_page_networks(require_auth=False):
-    if not require_auth:
-        return scan_networks()
-
-    active_profile = config_manager.get_active_profile()
-    ssid = active_profile.get("wifi", {}).get("ssid", "") if active_profile else ""
-    return [{"ssid": ssid, "rssi": 0}] if ssid else []
+    return scan_networks()
 
 
 def _send_json(cl, value):
-    cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n")
+    cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n")
     cl.send(ujson.dumps(value).encode())
 
 
-def _send_json_status(cl, status, value):
+def _send_json_status(cl, status, value, extra_headers=None):
     reason = {
         200: "OK", 201: "Created", 400: "Bad Request", 401: "Unauthorized",
         403: "Forbidden", 404: "Not Found", 409: "Conflict", 411: "Length Required",
-        413: "Payload Too Large", 500: "Internal Server Error",
+        413: "Payload Too Large", 429: "Too Many Requests", 500: "Internal Server Error",
         507: "Insufficient Storage",
     }.get(status, "Error")
-    header = "HTTP/1.0 {} {}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n".format(status, reason)
+    header = "HTTP/1.0 {} {}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n".format(status, reason)
+    for name, value in (extra_headers or {}).items():
+        header += "{}: {}\r\n".format(name, value)
+    header += "\r\n"
     send_chunk(cl, header)
     send_chunk(cl, ujson.dumps(value))
 
@@ -498,7 +823,7 @@ def _send_image_list(cl, collection, event):
     send_chunk(cl, '],"fs_free":' + str(filesystem_free()) + ",\"catalog_generation\":" + str(image_store.catalog_generation) + "}")
 
 
-def _handle_image_api(cl, request):
+def _handle_image_api(cl, request, require_auth=False):
     method, target = _request_line(request)
     path = target.split("?", 1)[0]
     if path == "/api/v1/device" and method == "GET":
@@ -517,8 +842,9 @@ def _handle_image_api(cl, request):
     if not path.startswith("/api/v1/images"):
         return False
 
-    if not _is_lan_authorized(request):
-        _send_auth_required(cl)
+    image_mutation = method in ("PUT", "POST", "DELETE")
+    if (image_mutation or _auth_required_for_request(require_auth)) and not _is_lan_authorized(request):
+        _send_auth_required(cl, api=True)
         return True
 
     headers = _request_headers(request)
@@ -527,6 +853,9 @@ def _handle_image_api(cl, request):
         return True
     if method in ("PUT", "POST", "DELETE") and headers.get("x-pico-clock-api") != "1":
         _send_json_status(cl, 400, {"error": "client_header_required", "message": "X-Pico-Clock-API: 1 is required."})
+        return True
+    if image_mutation and not _request_csrf_valid(request):
+        _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
         return True
 
     try:
@@ -598,7 +927,7 @@ def _presence_epoch(date_value, time_value):
 
 def _send_presence_lines(cl, kind):
     manager = get_presence_manager()
-    cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n[")
+    cl.send(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n[")
     if manager:
         path = "presence_daily.log" if kind == "daily" else "presence_events.log"
         first = True
@@ -620,7 +949,7 @@ def _send_presence_lines(cl, kind):
 
 
 def _send_presence_dashboard(cl):
-    send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n")
+    send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
     _send_file_chunks(cl, '/html/dashboard.bin')
 
 def _save_settings_from_params(params):
@@ -672,9 +1001,12 @@ def _save_settings_from_params(params):
     if ap_password_input and not 8 <= len(ap_password_input) <= 63:
         raise ValueError("AP password must contain 8-63 characters.")
     lan_admin_password = params.get("lan_admin_password", "")
+    password_changed = bool(lan_admin_password)
+    if password_changed and not PASSWORD_MIN_LENGTH <= len(lan_admin_password) <= 128:
+        raise ValueError("管理密碼必須為 8-128 個字元。")
     global_updates = {
         "ap_mode.ssid": params.get("ap_mode_ssid", "Pi_Clock_AP"),
-        "lan_admin.username": params.get("lan_admin_username", "admin") or "admin",
+        "lan_admin.username": FIXED_ADMIN_USERNAME,
     }
     if api_key_input and not api_key_input.startswith("已設定") and "..." not in api_key_input:
         global_updates["weather_api_key"] = api_key_input
@@ -683,12 +1015,14 @@ def _save_settings_from_params(params):
     if ap_password_input:
         global_updates["ap_mode.password"] = ap_password_input
     if lan_admin_password:
-        global_updates["lan_admin.password"] = lan_admin_password
+        global_updates["lan_admin.password"] = _password_hash(lan_admin_password)
     discord_webhook = params.get("discord_webhook_url", "")
     if discord_webhook:
         global_updates["discord_webhook_url"] = discord_webhook
     elif params.get("clear_discord_webhook") == "true":
         global_updates["discord_webhook_url"] = ""
+    if profile_data["wifi"]["ssid"]:
+        global_updates["setup_complete"] = True
 
     config_manager.apply_profile_update(
         original_name,
@@ -697,30 +1031,51 @@ def _save_settings_from_params(params):
         activate=True,
         mark_connected=True,
     )
+    if password_changed:
+        _clear_session()
 
-def handle_config_request(cl, request, require_auth=False):
+def handle_config_request(cl, request, require_auth=False, client_key="unknown"):
     if not request:
         cl.close()
         return
 
     method, target = _request_line(request)
+    path = target.split("?", 1)[0]
     print("Request: {} {}".format(method, target.split("?", 1)[0]))
 
-    if _handle_image_api(cl, request):
+    if method == "GET" and path == "/login":
+        send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
+        _send_file_chunks(cl, "/html/login.bin")
         cl.close()
         return
 
-    if method == "GET" and target.split("?", 1)[0] == "/images":
-        if not _is_lan_authorized(request):
-            _send_auth_required(cl)
-        else:
-            send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
-            _send_file_chunks(cl, "/html/images.bin")
+    if _handle_auth_api(cl, request, client_key):
         cl.close()
         return
 
-    if require_auth and not _is_lan_authorized(request):
-        _send_auth_required(cl)
+    if _handle_image_api(cl, request, require_auth):
+        cl.close()
+        return
+
+    if path == "/favicon.ico":
+        cl.send(b"HTTP/1.0 404 Not Found\r\nCache-Control: no-store\r\n\r\n")
+        cl.close()
+        return
+
+    auth_required = _auth_required_for_request(require_auth)
+    if not _admin_password_configured() and path != "/":
+        _send_auth_required(cl, api=_request_is_api(target))
+        cl.close()
+        return
+
+    if auth_required and not _is_lan_authorized(request):
+        _send_auth_required(cl, api=_request_is_api(target))
+        cl.close()
+        return
+
+    if method == "GET" and path == "/images":
+        send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
+        _send_file_chunks(cl, "/html/images.bin")
         cl.close()
         return
 
@@ -728,44 +1083,53 @@ def handle_config_request(cl, request, require_auth=False):
         cl.close()
         return
 
-    if "GET /favicon.ico" in request:
-        cl.send(b"HTTP/1.0 404 Not Found\r\n\r\n")
+    if method == "GET" and path == "/":
+        if not _admin_password_configured():
+            send_chunk(cl, b"HTTP/1.0 302 Found\r\nLocation: /login\r\nCache-Control: no-store\r\n\r\n")
+        else:
+            send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
+            _send_file_chunks(cl, "/html/settings.bin")
         cl.close()
         return
 
-    if "GET /dashboard" in request:
+    if method == "GET" and path == "/dashboard":
         _send_presence_dashboard(cl)
         cl.close()
         return
 
-    if "GET /presence/status" in request:
+    if method == "GET" and path == "/presence/status":
         manager = get_presence_manager()
         status = manager.get_status() if manager else {"state": 0, "adc": -1, "threshold": -1, "session_seconds": 0, "segment_seconds": 0, "today_seconds": 0, "last_change_date": "", "last_change_time": "", "transitions": 0, "now_epoch": 0}
         _send_json(cl, status)
         cl.close()
         return
 
-    if "GET /presence/events" in request:
+    if method == "GET" and path == "/presence/events":
         _send_presence_lines(cl, "events")
         cl.close()
         return
 
-    if "GET /presence/daily" in request:
+    if method == "GET" and path == "/presence/daily":
         _send_presence_lines(cl, "daily")
         cl.close()
         return
 
-    if "GET /adc" in request:
+    if method == "GET" and path == "/adc":
         adc_value = machine.ADC(machine.Pin(26)).read_u16()
-        response = "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\n\r\n{\"adc\": " + str(adc_value) + "}"
+        response = "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n{\"adc\": " + str(adc_value) + "}"
         cl.send(response.encode())
         cl.close()
         return
 
-    if "GET /test_chime" in request:
-        params = _get_query_params(request)
-        if not verify_csrf_token(params):
-            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+    if method == "POST" and path == "/test_chime":
+        try:
+            params = parse_query_string(_read_request_body(cl, request))
+        except (ValueError, TypeError) as exc:
+            _send_json_status(cl, 400, {"error": "invalid_request", "message": str(exc)})
+            cl.close()
+            return
+        if not _request_csrf_valid(request, params):
+            _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
             cl.close()
             return
 
@@ -776,33 +1140,38 @@ def handle_config_request(cl, request, require_auth=False):
                 volume=int(params.get("volume", "80"))
             )
             chime_obj.deinit()
-            cl.send(b"HTTP/1.0 200 OK\r\n\r\nOK")
+            _send_json_status(cl, 200, {"tested": True})
         except Exception as e:
-            print(f"Error: Chime test failed. {e}")
-            cl.send(b"HTTP/1.0 500 Internal Server Error\r\n\r\nError")
+            print("Error: Chime test failed. {}".format(e))
+            _send_json_status(cl, 500, {"error": "chime_failed", "message": "測試響聲失敗。"})
         cl.close()
         return
 
-    if "GET /edit_profile?" in request:
+    if method == "GET" and path == "/edit_profile":
         params = _get_query_params(request)
         profile = config_manager.get_profile(params.get("name", ""))
         if profile:
-            cl.send(b"HTTP/1.0 302 Found\r\nLocation: /\r\n\r\n")
+            cl.send(b"HTTP/1.0 302 Found\r\nLocation: /\r\nCache-Control: no-store\r\n\r\n")
         else:
-            cl.send(b"HTTP/1.0 404 Not Found\r\n\r\nProfile not found")
+            _send_json_status(cl, 404, {"error": "not_found", "message": "Profile not found."})
         cl.close()
         return
 
-    if "GET /new_profile?" in request:
-        params = _get_query_params(request)
-        if not verify_csrf_token(params):
-            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+    if method == "POST" and path == "/new_profile":
+        try:
+            params = parse_query_string(_read_request_body(cl, request))
+        except (ValueError, TypeError) as exc:
+            _send_json_status(cl, 400, {"error": "invalid_request", "message": str(exc)})
+            cl.close()
+            return
+        if not _request_csrf_valid(request, params):
+            _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
             cl.close()
             return
 
         new_name = params.get("name", "")
         if not new_name or len(new_name) > 32 or any(ord(char) < 32 for char in new_name):
-            cl.send(b"HTTP/1.0 400 Bad Request\r\n\r\nInvalid profile name")
+            _send_json_status(cl, 400, {"error": "invalid_name", "message": "Profile name is invalid."})
             cl.close()
             return
 
@@ -837,33 +1206,54 @@ def handle_config_request(cl, request, require_auth=False):
 
         try:
             config_manager.add_profile(new_profile)
-            cl.send(b"HTTP/1.0 302 Found\r\nLocation: /\r\n\r\n")
-        except ValueError:
-            cl.send(b"HTTP/1.0 400 Bad Request\r\n\r\nProfile name already exists")
+            _send_json_status(cl, 200, {"saved": True})
+        except ValueError as exc:
+            _send_json_status(cl, 400, {"error": "invalid_name", "message": str(exc)})
         cl.close()
         return
 
-    if "GET /delete_profile?" in request:
-        params = _get_query_params(request)
-        if not verify_csrf_token(params):
-            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+    if method == "POST" and path == "/delete_profile":
+        try:
+            params = parse_query_string(_read_request_body(cl, request))
+        except (ValueError, TypeError) as exc:
+            _send_json_status(cl, 400, {"error": "invalid_request", "message": str(exc)})
+            cl.close()
+            return
+        if not _request_csrf_valid(request, params):
+            _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
             cl.close()
             return
 
         try:
             config_manager.delete_profile(params.get("name", ""))
-            cl.send(b"HTTP/1.0 302 Found\r\nLocation: /\r\n\r\n")
+            _send_json_status(cl, 200, {"deleted": True})
         except ValueError as e:
-            cl.send(("HTTP/1.0 400 Bad Request\r\n\r\n" + str(e)).encode())
+            _send_json_status(cl, 400, {"error": "invalid_profile", "message": str(e)})
         cl.close()
         return
 
-    if "GET /factory_reset" in request:
-        params = _get_query_params(request)
-        if not verify_csrf_token(params):
-            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
+    if method == "POST" and path == "/factory_reset":
+        try:
+            params = parse_query_string(_read_request_body(cl, request))
+        except (ValueError, TypeError) as exc:
+            _send_json_status(cl, 400, {"error": "invalid_request", "message": str(exc)})
             cl.close()
             return
+        if not _request_csrf_valid(request, params):
+            _send_json_status(cl, 403, {"error": "csrf", "message": "CSRF token is invalid."})
+            cl.close()
+            return
+        reset_key = _reset_failure_key(client_key)
+        if _failure_is_limited(_RESET_FAILURES, reset_key, 3):
+            _send_json_status(cl, 429, {"error": "rate_limited", "message": "重置嘗試過多，請稍後再試。"})
+            cl.close()
+            return
+        if not _constant_time_equal(params.get("confirmation", ""), "RESET"):
+            _record_failure(_RESET_FAILURES, reset_key, 3)
+            _send_json_status(cl, 400, {"error": "confirmation_required", "message": "請輸入 RESET 確認。"})
+            cl.close()
+            return
+        _clear_failure(_RESET_FAILURES, reset_key)
 
         try:
             factory_reset()
@@ -873,39 +1263,12 @@ def handle_config_request(cl, request, require_auth=False):
             time.sleep(5)
             machine.reset()
         except Exception as e:
-            cl.send(HTML_RESET_ERROR_PREFIX)
-            cl.send(str(e).encode('utf-8'))
-            cl.send(HTML_RESET_ERROR_SUFFIX)
+            print("Error: Factory reset failed. {}".format(e))
+            _send_json_status(cl, 500, {"error": "reset_failed", "message": "完全重置失敗。"})
             cl.close()
         return
 
-    if "GET /save_profile?" in request:
-        params = _get_query_params(request)
-        if not verify_csrf_token(params):
-            cl.send(b"HTTP/1.1 403 Forbidden\r\n\r\nCSRF token invalid")
-            cl.close()
-            return
-
-        try:
-            _save_settings_from_params(params)
-            _send_file_chunks(cl, '/html/success.bin')
-            cl.close()
-            update_display_Restart()
-            time.sleep(5)
-            machine.reset()
-        except Exception as e:
-            print(f"Error: Failed to save profile. {e}")
-            cl.send(HTML_ERROR_PAGE_PREFIX)
-            cl.send(str(e).encode('utf-8'))
-            cl.send(HTML_ERROR_PAGE_SUFFIX)
-            cl.close()
-        return
-
-    try:
-        send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
-        _send_file_chunks(cl, "/html/settings.bin")
-    except Exception as e:
-        print(f"Error: Failed to send page. {e}")
+    _send_json_status(cl, 404, {"error": "not_found", "message": "Page not found."})
     cl.close()
 
 class LanConfigServer:
@@ -927,7 +1290,7 @@ class LanConfigServer:
             print(f"Info: LAN client connected from {addr}.")
             cl.settimeout(3.0)
             request = _read_http_request(cl)
-            handle_config_request(cl, request, require_auth=True)
+            handle_config_request(cl, request, require_auth=True, client_key=addr[0])
             if _consume_reboot_request():
                 update_display_Restart()
                 time.sleep(1)
@@ -1012,7 +1375,7 @@ def run_web_server():
             print("Info: AP client connected from {}.".format(client_addr))
             client.settimeout(3.0)
             request = _read_http_request(client)
-            handle_config_request(client, request, require_auth=False)
+            handle_config_request(client, request, require_auth=False, client_key=client_addr[0])
 
             preview = image_store.consume_preview()
             if preview:

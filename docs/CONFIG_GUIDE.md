@@ -15,7 +15,9 @@
   "schema_version": 3,
   "global": {
     "ap_mode": { ... },
-    "weather_api_key": "..."
+    "weather_api_key": "...",
+    "setup_complete": false,
+    "lan_admin": { "username": "admin", "password": "" }
   },
   "profiles": [ ... ],
   "active_profile": "設定檔名稱",
@@ -58,10 +60,11 @@ OpenWeatherMap API 金鑰（所有設定檔共用同一個 API Key）
 | 欄位 | 用途 | 注意事項 |
 |---|---|---|
 | `global.discord_webhook_url` | 選用的 Discord 在席通知 webhook | 視為 secret；留空可停用通知 |
-| `global.lan_admin.username` | LAN 設定／圖片管理的 Basic Auth 使用者 | 建議部署後修改預設值 |
-| `global.lan_admin.password` | LAN 設定／圖片管理的 Basic Auth 密碼 | 不要提交真實密碼 |
+| `global.setup_complete` | 是否已完成首次 Wi-Fi 設定；裝置也會依既有 profile 自動補正 | 一般不要手動修改 |
+| `global.lan_admin.username` | WebUI session 固定登入帳號 | 固定為 `admin`；保留此欄位作舊設定相容性 |
+| `global.lan_admin.password` | PBKDF2-HMAC-SHA256 密碼記錄，不是明文密碼 | 不要提交真實密碼或雜湊記錄 |
 
-Web UI 對 secret 欄位只顯示「已設定」狀態；留白保存時會保留原值。LAN 設定與圖片 API 的認證細節請見 [`IMAGE_API.md`](IMAGE_API.md)。
+Web UI 對 secret 欄位只顯示「已設定」狀態；留白保存時會保留原值。裝置使用自訂登入頁與 server-side 單一 session，不使用 HTTP Basic Auth。LAN 設定與圖片 API 的認證細節請見 [`IMAGE_API.md`](IMAGE_API.md)。
 
 ---
 
@@ -162,11 +165,14 @@ WiFi 連線設定
 2. 系統會重啟並進入 AP Mode
 3. 連接到 WiFi：`Pi_Clock_AP`（或你設定的 AP SSID）
 4. 開啟瀏覽器，前往 `192.168.4.1`
-5. 在網頁介面中管理設定檔：
+5. 首次進入先設定固定管理帳號 `admin` 的至少 8 字元密碼；之後以 session 登入 WebUI
+6. 在網頁介面中管理設定檔：
    - 新增設定檔
    - 編輯設定檔
    - 刪除設定檔
    - 切換活動設定檔
+
+管理介面目前使用 HTTP。即使 session cookie 不再於每次 request 傳送密碼，同網段主動攻擊者仍可能攔截並重放 cookie 或 CSRF token；請只在可信任的 AP/LAN 使用。
 
 ### 方法 2：手動編輯 config.json
 

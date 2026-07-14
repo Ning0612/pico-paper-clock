@@ -1,4 +1,3 @@
-import base64
 import importlib.util
 import json
 import sys
@@ -31,6 +30,20 @@ class FakeClient:
     def readinto(self, _buffer, _length=None):
         self.read_calls += 1
         return 0
+
+
+class BodyClient(FakeClient):
+    def __init__(self, body=b""):
+        super().__init__()
+        self.body = bytearray(body)
+
+    def readinto(self, buffer, length=None):
+        size = min(len(self.body), length if length is not None else len(buffer))
+        if size:
+            buffer[:size] = self.body[:size]
+            del self.body[:size]
+        self.read_calls += 1
+        return size
 
 
 class WifiProtocolTests(unittest.TestCase):
@@ -72,11 +85,21 @@ class WifiProtocolTests(unittest.TestCase):
         sys.modules["display_manager"] = display
 
         class Config:
+            values = {
+                "lan_admin.username": "admin",
+                "lan_admin.password": "",
+                "setup_complete": False,
+            }
+
             def get_global(self, path, default=None):
-                return {"lan_admin.username": "admin", "lan_admin.password": "secret"}.get(path, default)
+                return self.values.get(path, default)
+
+            def set_global(self, path, value):
+                self.values[path] = value
 
         config = types.ModuleType("config_manager")
         config.config_manager = Config()
+        cls.config = config.config_manager
         sys.modules["config_manager"] = config
 
         chime = types.ModuleType("chime")
@@ -101,6 +124,8 @@ class WifiProtocolTests(unittest.TestCase):
         images.ImageStoreError = StoreError
         images.filesystem_free = lambda: 98765
         images.image_store = types.SimpleNamespace(catalog_generation=0)
+        images.image_directory = lambda *_args: None
+        images.image_store.iter_images = lambda *_args: iter(())
         sys.modules["image_manager"] = images
 
         source = Path(__file__).resolve().parents[1] / "src" / "wifi_manager.py"
@@ -121,11 +146,97 @@ class WifiProtocolTests(unittest.TestCase):
             else:
                 setattr(time, name, value)
 
-    def test_basic_auth_requires_exact_header(self):
-        token = base64.b64encode(b"admin:secret").decode()
-        request = "GET /api/v1/images HTTP/1.1\r\nAuthorization: Basic {}\r\n\r\n".format(token)
+    def test_basic_auth_is_not_accepted_and_session_cookie_is_exact(self):
+        self.module._clear_session()
+        basic = "GET /api/v1/images HTTP/1.1\r\nAuthorization: Basic abc\r\n\r\n"
+        self.assertFalse(self.module._is_lan_authorized(basic))
+        token, csrf = self.module._start_session()
+        request = "GET /api/v1/images HTTP/1.1\r\nCookie: {}={};\r\n\r\n".format(
+            self.module.SESSION_COOKIE_NAME, token
+        )
         self.assertTrue(self.module._is_lan_authorized(request))
         self.assertFalse(self.module._is_lan_authorized(request.replace(token, token + "junk")))
+        self.assertTrue(self.module._request_csrf_valid(
+            request + "X-CSRF-Token: {}\r\n".format(csrf)
+        ))
+
+    def test_password_record_uses_pbkdf2_and_session_expires(self):
+        original_calibration = self.module._calibrate_pbkdf2_iterations
+        self.module._calibrate_pbkdf2_iterations = lambda: 64
+        try:
+            record = self.module._password_hash("correct horse battery staple")
+        finally:
+            self.module._calibrate_pbkdf2_iterations = original_calibration
+
+        self.assertTrue(record.startswith("pbkdf2-sha256$64$"))
+        self.assertTrue(self.module._password_matches("correct horse battery staple", record))
+        self.assertFalse(self.module._password_matches("wrong password", record))
+
+        self.module._clear_session()
+        token, _ = self.module._start_session()
+        request = "GET /api/v1/config HTTP/1.1\r\nCookie: {}={}\r\n\r\n".format(
+            self.module.SESSION_COOKIE_NAME, token
+        )
+        self.assertTrue(self.module._is_lan_authorized(request))
+        original_ticks = time.ticks_ms
+        try:
+            time.ticks_ms = lambda: 1000 + self.module.SESSION_IDLE_TIMEOUT_MS + 1
+            self.assertFalse(self.module._is_lan_authorized(request))
+        finally:
+            time.ticks_ms = original_ticks
+            self.module._clear_session()
+
+    def test_login_creates_session_and_logout_revokes_it(self):
+        self.config.values["lan_admin.password"] = ""
+        self.config.values["setup_complete"] = False
+        self.module._clear_session()
+        self.module._LOGIN_FAILURES.clear()
+        original_calibration = self.module._calibrate_pbkdf2_iterations
+        self.module._calibrate_pbkdf2_iterations = lambda: 64
+        try:
+            body = "password=correct123&password_confirm=correct123&csrf_token={}".format(
+                self.module.CSRF_TOKEN
+            ).encode()
+            request = "POST /api/v1/auth/login HTTP/1.1\r\nContent-Length: {}\r\n\r\n".format(len(body))
+            self.module._REQUEST_DEADLINE = self.module._request_now_ms() + 5000
+            response = BodyClient(body)
+            self.assertTrue(self.module._handle_auth_api(response, request, "127.0.0.1"))
+            self.assertIn(b"200 OK", bytes(response.sent))
+            self.assertIn(
+                ("Set-Cookie: {}=".format(self.module.SESSION_COOKIE_NAME)).encode(),
+                bytes(response.sent),
+            )
+            self.assertEqual(self.module._admin_username(), "admin")
+            token = self.module._CURRENT_SESSION_TOKEN
+            csrf = self.module._SESSION_CSRF_TOKEN
+            self.assertTrue(self.config.values["lan_admin.password"].startswith("pbkdf2-sha256$64$"))
+
+            session_request = "GET /api/v1/auth/session HTTP/1.1\r\nCookie: {}={}\r\n\r\n".format(
+                self.module.SESSION_COOKIE_NAME, token
+            )
+            session_response = BodyClient()
+            self.assertTrue(self.module._handle_auth_api(session_response, session_request, "127.0.0.1"))
+            self.assertIn(b'"authenticated": true', bytes(session_response.sent))
+
+            logout_request = (
+                "POST /api/v1/auth/logout HTTP/1.1\r\n"
+                "Cookie: {}={}\r\nX-CSRF-Token: {}\r\n\r\n"
+            ).format(self.module.SESSION_COOKIE_NAME, token, csrf)
+            logout_response = BodyClient()
+            self.assertTrue(self.module._handle_auth_api(logout_response, logout_request, "127.0.0.1"))
+            self.assertIsNone(self.module._CURRENT_SESSION_TOKEN)
+            self.assertIn(b"Max-Age=0", bytes(logout_response.sent))
+        finally:
+            self.module._calibrate_pbkdf2_iterations = original_calibration
+            self.module._clear_session()
+            self.config.values["lan_admin.password"] = ""
+            self.config.values["setup_complete"] = False
+
+    def test_login_redirect_rejects_external_and_control_character_targets(self):
+        self.assertEqual(self.module._safe_redirect("/dashboard"), "/dashboard")
+        self.assertEqual(self.module._safe_redirect("//evil.example"), "/")
+        self.assertEqual(self.module._safe_redirect("/\\\\evil.example"), "/")
+        self.assertEqual(self.module._safe_redirect("/dashboard\r\nX-Test: injected"), "/")
 
     def test_duplicate_length_and_transfer_encoding_are_rejected_before_body_read(self):
         for headers in (
@@ -151,8 +262,17 @@ class WifiProtocolTests(unittest.TestCase):
         self.assertIn(b"200 OK", bytes(public.sent))
 
         private = FakeClient()
-        self.assertTrue(self.module._handle_image_api(private, "GET /api/v1/images HTTP/1.1\r\n\r\n"))
+        self.assertTrue(self.module._handle_image_api(private, "GET /api/v1/images HTTP/1.1\r\n\r\n", require_auth=True))
         self.assertIn(b"401 Unauthorized", bytes(private.sent))
+
+    def test_image_mutations_require_session_before_initial_setup(self):
+        client = FakeClient()
+        request = (
+            "POST /api/v1/images/custom/sample/preview HTTP/1.1\r\n"
+            "X-Pico-Clock-API: 1\r\n\r\n"
+        )
+        self.assertTrue(self.module._handle_image_api(client, request, require_auth=False))
+        self.assertIn(b"401 Unauthorized", bytes(client.sent))
 
 
 if __name__ == "__main__":

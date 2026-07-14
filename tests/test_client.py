@@ -1,13 +1,15 @@
 import json
 import threading
+from urllib.parse import parse_qs
 import unittest
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from tools.pico_image_tool.client import DeviceClient
+from tools.pico_image_tool.client import DeviceClient, DeviceError
 
 
 class Handler(BaseHTTPRequestHandler):
     request_record = None
+    setup_required = False
 
     def log_message(self, *_):
         pass
@@ -20,11 +22,31 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _auth_json(self, status, value):
+        body = json.dumps(value).encode()
+        self.send_response(status)
+        self.send_header("Content-Type", "application/json")
+        self.send_header("Content-Length", str(len(body)))
+        self.send_header("Set-Cookie", "session=test-session; Path=/; HttpOnly; SameSite=Strict")
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self):
         if self.path == "/api/v1/device":
             self._json(200, {"device": "pi-paper-clock", "api_version": 1, "heap_free": 1234, "fs_free": 5678})
+        elif self.path == "/api/v1/auth/status":
+            self._json(200, {"setup_required": Handler.setup_required, "authenticated": False, "csrf_token": "pre-auth"})
         else:
             self._json(200, {"items": [], "fs_free": 5678})
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = parse_qs(self.rfile.read(length).decode())
+        if self.path == "/api/v1/auth/login":
+            self.assert_auth = body
+            self._auth_json(200, {"authenticated": True, "csrf_token": "session-csrf", "redirect": "/"})
+        else:
+            self._json(200, {})
 
     def do_PUT(self):
         length = int(self.headers["Content-Length"])
@@ -59,11 +81,20 @@ class ClientTests(unittest.TestCase):
         path, headers, received = Handler.request_record
         self.assertEqual(path, "/api/v1/images/custom/test.bin?overwrite=1&preview=1")
         self.assertEqual(headers["X-Pico-Clock-API"], "1")
-        self.assertTrue(headers["Authorization"].startswith("Basic "))
+        self.assertEqual(headers["Cookie"], "session=test-session")
+        self.assertEqual(headers["X-CSRF-Token"], "session-csrf")
         self.assertEqual(received, data)
         self.assertEqual(progress[-1], (2048, 2048))
+
+    def test_image_tool_requires_webui_first_setup(self):
+        Handler.setup_required = True
+        try:
+            with self.assertRaises(DeviceError) as context:
+                DeviceClient(self.host).list_images("custom")
+            self.assertEqual(context.exception.code, "setup_required")
+        finally:
+            Handler.setup_required = False
 
 
 if __name__ == "__main__":
     unittest.main()
-

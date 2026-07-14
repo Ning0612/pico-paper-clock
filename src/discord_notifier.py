@@ -6,7 +6,7 @@ import ssl
 from config_manager import config_manager
 
 FULL_DAY_SECONDS = 24 * 60 * 60
-PRESENCE_BAR_WIDTH = 15
+PRESENCE_BAR_WIDTH = 10
 DISCORD_GC_THRESHOLD = 4096
 
 
@@ -19,25 +19,82 @@ def _write_all(sock, data):
             raise OSError("Discord socket closed during write.")
         offset += written
 
-def _discord_payload(message):
-    buf = bytearray(b'{"content":"')
-    for c in message:
-        o = ord(c)
-        if c == '"':
+def _json_string(value):
+    """Returns one JSON string encoded as UTF-8 bytes with control escaping."""
+    if not isinstance(value, str):
+        value = str(value)
+    buf = bytearray(b'"')
+    for byte in value.encode("utf-8"):
+        if byte == 0x22:
             buf.extend(b'\\"')
-        elif c == '\\':
+        elif byte == 0x5C:
             buf.extend(b'\\\\')
-        elif c == '\n':
+        elif byte == 0x08:
+            buf.extend(b'\\b')
+        elif byte == 0x0C:
+            buf.extend(b'\\f')
+        elif byte == 0x0A:
             buf.extend(b'\\n')
-        elif c == '\r':
+        elif byte == 0x0D:
             buf.extend(b'\\r')
-        elif c == '\t':
+        elif byte == 0x09:
             buf.extend(b'\\t')
-        elif 0x20 <= o <= 0x7E:
-            buf.append(o)
+        elif byte < 0x20:
+            buf.extend("\\u00{:02x}".format(byte).encode())
         else:
-            buf.extend('\\u{:04x}'.format(o).encode())
-    buf.extend(b'"}')
+            buf.append(byte)
+    buf.extend(b'"')
+    return bytes(buf)
+
+
+def _discord_payload(message):
+    return b'{"content":' + _json_string(message) + b'}'
+
+
+def _presence_progress(total_seconds):
+    total_seconds = max(0, int(total_seconds))
+    percent = min(999, int(total_seconds * 100 / FULL_DAY_SECONDS))
+    filled = min(PRESENCE_BAR_WIDTH, percent // 10)
+    if percent >= 100:
+        block = "🟩"
+        color = 3066993
+    elif percent >= 80:
+        block = "🟦"
+        color = 3447003
+    elif percent >= 50:
+        block = "🟨"
+        color = 15132194
+    else:
+        block = "🟥"
+        color = 15158332
+    return block * filled + "⬜" * (PRESENCE_BAR_WIDTH - filled), percent, color
+
+
+def _presence_summary_embed_payload(date, total_seconds, longest_seconds, session_count):
+    progress, percent, color = _presence_progress(total_seconds)
+    title = "📊 在席日報 · {}".format(_display_date(date))
+    description = "{}  {}%".format(progress, percent)
+    fields = (
+        ("書桌前", _format_duration(total_seconds)),
+        ("最長一次", _format_duration(longest_seconds)),
+        ("次數", str(session_count)),
+    )
+    buf = bytearray(b'{"embeds":[{"title":')
+    buf.extend(_json_string(title))
+    buf.extend(b',"description":')
+    buf.extend(_json_string(description))
+    buf.extend(b',"fields":[{')
+    for index, (name, value) in enumerate(fields):
+        if index:
+            buf.extend(b'},{')
+        buf.extend(b'"name":')
+        buf.extend(_json_string(name))
+        buf.extend(b',"value":')
+        buf.extend(_json_string(value))
+        buf.extend(b',"inline":true')
+    buf.extend(b'}],"color":')
+    buf.extend(str(color).encode())
+    buf.extend(b'}]}')
     return bytes(buf)
 
 
@@ -133,26 +190,24 @@ def _display_time(time_value):
 
 
 def _presence_bar(total_seconds):
-    total_seconds = max(0, min(int(total_seconds), FULL_DAY_SECONDS))
-    desk_percent = int((total_seconds * 100 + FULL_DAY_SECONDS // 2) // FULL_DAY_SECONDS)
-    away_percent = 100 - desk_percent
-    desk_units = int((total_seconds * PRESENCE_BAR_WIDTH + FULL_DAY_SECONDS // 2) // FULL_DAY_SECONDS)
+    total_seconds = max(0, int(total_seconds))
+    desk_percent = min(999, int(total_seconds * 100 // FULL_DAY_SECONDS))
+    away_percent = max(0, 100 - desk_percent)
+    desk_units = min(PRESENCE_BAR_WIDTH, int(total_seconds * PRESENCE_BAR_WIDTH // FULL_DAY_SECONDS))
     away_units = PRESENCE_BAR_WIDTH - desk_units
     return away_percent, "[" + chr(0x2591) * away_units + chr(0x2588) * desk_units + "]", desk_percent
 
 
 def _presence_summary_message(date, total_seconds, longest_seconds, session_count):
-    display_date = _display_date(date)
-    away_percent, bar, desk_percent = _presence_bar(total_seconds)
+    _, progress, percent = _presence_bar(total_seconds)
     return (
-        "{}\n"
-        "\u96e2\u958b {}% {} \u66f8\u684c\u524d {}%\n"
-        "\u66f8\u684c\u524d {} / \u6700\u9577\u4e00\u6b21 {} / \u6b21\u6578 {}"
+        "📊 在席日報 · {}\n"
+        "{}  {}%\n"
+        "書桌前 {} / 最長一次 {} / 次數 {}"
     ).format(
-        display_date,
-        away_percent,
-        bar,
-        desk_percent,
+        _display_date(date),
+        progress,
+        percent,
         _format_duration(total_seconds),
         _format_duration(longest_seconds),
         session_count
@@ -160,15 +215,10 @@ def _presence_summary_message(date, total_seconds, longest_seconds, session_coun
 
 
 def _presence_session_message(start_date, start_time, end_date, end_time, duration_seconds):
-    start_text = "{} {}".format(_display_date(start_date), _display_time(start_time))
-    if start_date == end_date:
-        end_text = _display_time(end_time)
-    else:
-        end_text = "{} {}".format(_display_date(end_date), _display_time(end_time))
-    return "{} ~ {}\n\u7e3d\u5171\u6301\u7e8c {}".format(
-        start_text,
-        end_text,
-        _format_duration(duration_seconds)
+    start_text = _display_time(start_time)
+    end_text = _display_time(end_time)
+    return "📖 書桌前時段結束\n{} → {}（{}）".format(
+        start_text, end_text, _format_duration(duration_seconds)
     )
 
 
@@ -185,7 +235,7 @@ def send_lan_ip(ip_address):
 
     status_code = -1
     try:
-        message = "Pico Paper Clock connected: http://{}".format(ip_address)
+        message = "✅ Pi Paper Clock 已上線\nWebUI: http://{}".format(ip_address)
         payload = _discord_payload(message)
         status_code, detail = _post_discord_webhook(webhook_url, payload)
         if status_code in (200, 204):
@@ -280,18 +330,28 @@ def send_presence_summary(summary_line):
 
     status_code = -1
     try:
-        message = _presence_summary_message(
+        payload = _presence_summary_embed_payload(
             date, total_seconds, longest_seconds, session_count
         )
-        payload = _discord_payload(message)
         status_code, _ = _post_discord_webhook(webhook_url, payload)
         if status_code in (200, 204):
             print("Success: Discord presence summary sent.")
             return True
         print("Error: Presence summary failed. Status code: {}".format(status_code))
     except MemoryError:
-        print("Error: Memory allocation failed during presence summary.")
-        return None
+        print("Warning: Memory allocation failed during presence summary; using L1 fallback.")
+        try:
+            fallback = _discord_payload(_presence_summary_message(
+                date, total_seconds, longest_seconds, session_count
+            ))
+            status_code, _ = _post_discord_webhook(webhook_url, fallback)
+            return status_code in (200, 204)
+        except MemoryError:
+            print("Error: Memory allocation failed during presence summary fallback.")
+            return None
+        except Exception as e:
+            print("Error: Presence summary fallback failed. Details: {}".format(e))
+            return False
     except Exception as e:
         print("Error: Presence summary failed. Details: {}".format(e))
         if "ENOMEM" in str(e):

@@ -62,9 +62,10 @@ class ConfigManager:
                 },
                 "weather_api_key": "",
                 "discord_webhook_url": "",
+                "setup_complete": False,
                 "lan_admin": {
                     "username": "admin",
-                    "password": "admin"
+                    "password": ""
                 }
             },
             "profiles": [
@@ -109,9 +110,10 @@ class ConfigManager:
                     },
                     "weather_api_key": legacy.get("weather", {}).get("api_key", ""),
                     "discord_webhook_url": "",
+                    "setup_complete": bool(legacy.get("wifi", {}).get("ssid", "")),
                     "lan_admin": {
                         "username": "admin",
-                        "password": "admin"
+                        "password": ""
                     }
                 },
                 "profiles": [
@@ -218,6 +220,10 @@ class ConfigManager:
             if self.config.get("last_connected_profile") is not None:
                 self.config["last_connected_profile"] = None
                 changed = True
+        active = self.get_active_profile()
+        if not global_config.get("setup_complete") and active and active.get("wifi", {}).get("ssid", ""):
+            global_config["setup_complete"] = True
+            changed = True
         if self._schema_version_value() < CONFIG_SCHEMA_VERSION:
             self.config["schema_version"] = CONFIG_SCHEMA_VERSION
             changed = True

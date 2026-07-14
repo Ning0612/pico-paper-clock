@@ -7,9 +7,10 @@
     },
     "weather_api_key": "your_openweathermap_api_key_here",
     "discord_webhook_url": "https://discord.com/api/webhooks/your_webhook_id/your_webhook_token",
+    "setup_complete": false,
     "lan_admin": {
       "username": "admin",
-      "password": "admin"
+      "password": ""
     }
   },
   "profiles": [

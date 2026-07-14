@@ -45,7 +45,7 @@ class PicoImageTool(tk.Tk):
             "threshold": tk.IntVar(value=128), "invert": tk.BooleanVar(value=False),
             "focus_x": tk.DoubleVar(value=0.5), "focus_y": tk.DoubleVar(value=0.5),
             "device": tk.StringVar(value="192.168.4.1"), "username": tk.StringVar(value="admin"),
-            "password": tk.StringVar(value="admin"), "name": tk.StringVar(value="image.bin"),
+            "password": tk.StringVar(value=""), "name": tk.StringVar(value="image.bin"),
             "overwrite": tk.BooleanVar(value=False), "preview": tk.BooleanVar(value=False),
             "status": tk.StringVar(value="請先選取圖片"),
         }

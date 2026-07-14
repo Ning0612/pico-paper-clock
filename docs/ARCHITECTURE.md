@@ -12,7 +12,7 @@ main.py
        └─ LanConfigServer / AP web server → wifi_manager dispatcher
 ```
 
-啟動時先復原圖片交易檔，再連線並嘗試發送 Discord LAN IP 通知；通知完成後才載入控制器、顯示與感測器工作路徑，最後建立 LAN server。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
+啟動時先復原圖片交易檔，再連線、同步 NTP 時間並嘗試發送 Discord LAN IP 通知；通知完成後才載入控制器、顯示與感測器工作路徑，最後建立 LAN server。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
 
 ## 記憶體邊界
 
@@ -20,7 +20,7 @@ main.py
 - 圖片以固定列 buffer 讀取；網路上傳以 512-byte buffer 串流，不把整張圖片載入 RAM。
 - SPI 傳送使用 buffer write，避免逐 byte 建立暫時物件。
 - 長生命週期 controller、presence、image store/catalog 使用 `__slots__`。
-- Discord webhook 不使用 `urequests.Response` 路徑，改用 raw `ssl` socket：只建立固定大小的 HTTP headers/payload、處理 partial write、讀取 status line 後立即關閉 socket；送出前後執行 `gc.collect()`，並暫時調整 GC threshold 後恢復原值。
+- Discord webhook 不使用 `urequests.Response` 路徑，改用 raw `ssl` socket：只建立固定大小的 HTTP headers/payload、處理 partial write、讀取 status line 後立即關閉 socket；送出前後執行 `gc.collect()`，並暫時調整 GC threshold 後恢復原值。NTP 會在第一次 TLS 呼叫前同步；目前 firmware tree 尚未附帶 CA trust anchor，因此此連線仍不能宣稱完成憑證鏈／hostname 驗證，正式部署前需補上 CA bundle，不能以不驗證的 TLS 取代。
 - 啟動通知在 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試。
 - Discord `ENOMEM` 會回傳可重試結果；presence queue 在記憶體壓力後暫停一個 flush interval，之後自動恢復嘗試，不丟棄 pending session/summary。
 - DHT22 使用 2500 ms 最小讀取間隔；讀取失敗改用 10 秒 backoff，保留上一筆快取值，避免感測器錯誤反覆消耗 heap 與刷 serial log。
@@ -51,8 +51,10 @@ main.py
 
 ## HTTP 邊界
 
-- `/api/v1/device` 可匿名讀取，圖片變更操作需要 LAN Admin Basic Auth 與 `X-Pico-Clock-API: 1`。
-- 設定頁與圖片頁在 LAN 需要 Basic Auth；AP 模式沿用同一 dispatcher。
+- `/api/v1/device` 可匿名讀取；圖片與設定 API 在完成首次設定後需要 WebUI server-side 單一 session、CSRF token，圖片變更另需 `X-Pico-Clock-API: 1`。
+- 設定頁、圖片頁、儀表板與感測資料在 LAN/AP 共用同一 session dispatcher；首次出廠 AP 允許完成首次密碼設定，之後即要求 session。
+- session 使用 128-bit CSPRNG token、idle 30 分鐘／absolute 24 小時 monotonic timeout；重開機、登出與密碼變更會撤銷 session。管理密碼以 PBKDF2-HMAC-SHA256 儲存。
+- 管理介面仍是 HTTP；請限制在可信任的隔離 LAN/AP，因 HTTP 無法防止 session token 被同網段攔截重放。
 - body 只接受單一 `Content-Length`，拒絕重複長度與 `Transfer-Encoding`。
 - request 有總讀取 deadline；Pico W 正常圖片串流使用 8 秒上限。
 - 圖片寫入採 `.part`、`.bak` 與 marker transaction，開機會復原未完成狀態。
@@ -79,6 +81,6 @@ main.py
 .\.venv\Scripts\python.exe upload.py --port COM6 --no-clean
 ```
 
-本次記憶體路徑的最低驗證包括 26 個 host tests、`compileall`、`git diff --check`，以及 Pico W serial 中的 `Success: Discord LAN IP notification sent.`、DHT22 讀值與天氣請求成功。完整 peak heap 仍應以實際硬體長跑資料為準。
+本次記憶體路徑的最低驗證包括 34 個 host tests、`compileall`、`git diff --check`，以及 Pico W serial 中的 `Success: Discord LAN IP notification sent.`、DHT22 讀值與天氣請求成功。完整 peak heap 仍應以實際硬體長跑資料為準。
 
 桌面 EXE 由 `tools/build_image_tool.ps1` 建置。若使用 `--recursive-clean`，部署前要先保存裝置上只有 runtime 的圖片。

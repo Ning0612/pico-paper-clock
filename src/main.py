@@ -21,8 +21,8 @@ if _startup_network_connected:
     _startup_lan_ip = _startup_wlan.ifconfig()[0]
     _startup_wlan = None
     gc.collect()
-    _startup_discord_sent = send_lan_ip(_startup_lan_ip) is True
     sync_time()
+    _startup_discord_sent = send_lan_ip(_startup_lan_ip) is True
 _startup_wlan = None
 
 
