@@ -16,6 +16,7 @@
   "global": {
     "ap_mode": { ... },
     "weather_api_key": "...",
+    "discord_webhook_url": "...",
     "setup_complete": false,
     "lan_admin": { "username": "admin", "password": "" }
   },
@@ -26,6 +27,8 @@
 ```
 
 `schema_version` 由裝置維護。啟動時會補齊 v3 必要欄位並將硬體相關數值限制在文件範圍；保存使用 `config.json.tmp`／`.bak` 交易，意外斷電後會自動復原。請勿手動降低版本號。
+
+若 `config.json` 的 `schema_version` 大於目前韌體支援的版本（例如被較新版本寫入後降級韌體），裝置會進入唯讀相容模式：略過遷移與正規化，且拒絕任何保存操作，直到韌體升級或版本號還原為止。
 
 ### 舊版格式（v1.x）自動遷移
 
