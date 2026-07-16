@@ -87,9 +87,21 @@ class DashboardUiTests(unittest.TestCase):
         self.assertIn("(data||[]).slice(-30)", self.source)
         self.assertIn("ev=ev||[]", self.source)
 
-    def test_daily_chart_labels_do_not_depend_on_bar_data(self):
+    def test_daily_chart_uses_calendar_days_and_day_only_labels(self):
+        for token in (
+            "function dailyChartRows(data,now,st)",
+            "start.setDate(end.getDate()-29)",
+            "for(var i=0;i<30;i++)",
+            "result.push({d:key,sec:item?item.sec:0,hasData:!!item})",
+            "drawDaily(da,now,st)",
+            "function dayText(d)",
+            "function monthDayText(d)",
+            "g.fillText(dayText(r.d)",
+            "showTip(event,(b.d?monthDayText(b.d)+' ':'')+fmt(b.sec))",
+        ):
+            self.assertIn(token, self.source)
         self.assertIn(
-            "(index%5===0||index===rows.length-1)&&r.d&&r.d.length>=8",
+            "(index%5===0||index===rows.length-1)&&r.d&&/^\\d{8}$/.test(r.d)",
             self.source,
         )
         self.assertIn("if(sec>0){g.fillStyle=teal", self.source)
