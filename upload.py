@@ -1,9 +1,17 @@
 import subprocess
 import os
 import argparse
-import time 
+import time
 import shutil
 import sys
+
+# 主控台編碼在非 UTF-8 locale（如繁體中文 Windows 的 cp950）下會讓含 emoji 的 print()
+# 拋出 UnicodeEncodeError，導致腳本在清除舊檔案後、上傳新檔案前崩潰，讓裝置卡在檔案不全的狀態。
+for _stream in (sys.stdout, sys.stderr):
+    try:
+        _stream.reconfigure(encoding="utf-8", errors="backslashreplace")
+    except (AttributeError, ValueError):
+        pass
 
 # --- Configuration ---
 SOURCE_DIR = "src"

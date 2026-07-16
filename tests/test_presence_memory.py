@@ -56,6 +56,37 @@ class PresenceMemoryTests(unittest.TestCase):
         self.assertTrue(manager.discord_disabled)
         self.assertFalse(manager.flush_discord())
 
+    def test_daily_retention_covers_year_heatmap_without_extending_events(self):
+        manager = self.module.PresenceManager(
+            discord_sender=lambda _summary: None,
+            session_sender=lambda *_args: None,
+        )
+        calls = []
+        original_trim = self.module._trim_by_date
+        original_mktime = self.module.time.mktime
+        self.module._trim_by_date = lambda path, date: calls.append((path, date))
+        self.module.time.mktime = lambda value: original_mktime(tuple(value) + (0,))
+        try:
+            manager._trim_retention("20260714")
+        finally:
+            self.module._trim_by_date = original_trim
+            self.module.time.mktime = original_mktime
+
+        self.assertEqual([path for path, _date in calls], [
+            self.module.EVENT_FILE,
+            self.module.DAILY_FILE,
+        ])
+        self.assertLess(calls[1][1], calls[0][1])
+
+    def test_status_exposes_device_current_date_for_web_clients(self):
+        manager = self.module.PresenceManager(
+            discord_sender=lambda _summary: None,
+            session_sender=lambda *_args: None,
+        )
+        manager.current_date = "20260715"
+
+        self.assertEqual(manager.get_status()["current_date"], "20260715")
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -14,6 +14,7 @@ src/config.py
 GEMINI.md
 AGENTS.md
 CLAUDE.md
+.serena/
 src/config.json
 src/image/weather_icons/convert.bat
 

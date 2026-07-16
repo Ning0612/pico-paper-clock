@@ -957,6 +957,58 @@ def _send_presence_lines(cl, kind):
         send_chunk(cl, response_buffer)
 
 
+def _presence_sessions(limit=40):
+    """Return recent desk sessions derived from the event log."""
+    manager = get_presence_manager()
+    status = manager.get_status() if manager else {}
+    current_state = bool(status.get("state"))
+    now_epoch = int(status.get("now_epoch") or 0)
+    sessions = []
+    start = None
+
+    for line in iter_lines("presence_events.log"):
+        try:
+            parts = line.split(",")
+            if len(parts) < 4:
+                continue
+            event_date, event_time = parts[0], parts[1]
+            event_state = int(parts[2])
+            event_epoch = _presence_epoch(event_date, event_time)
+            if not event_epoch:
+                continue
+            if event_state:
+                if start is None:
+                    start = (event_date, event_time, event_epoch)
+            elif start is not None:
+                duration = max(0, event_epoch - start[2])
+                sessions.append({
+                    "sd": start[0], "st": start[1],
+                    "ed": event_date, "et": event_time, "sec": duration,
+                })
+                if len(sessions) > limit:
+                    sessions.pop(0)
+                start = None
+        except (ValueError, TypeError, IndexError):
+            continue
+
+    if start is not None and current_state and now_epoch:
+        now = time.localtime(now_epoch)
+        end_date = "{:04d}{:02d}{:02d}".format(now[0], now[1], now[2])
+        end_time = "{:02d}{:02d}{:02d}".format(now[3], now[4], now[5])
+        sessions.append({
+            "sd": start[0], "st": start[1],
+            "ed": end_date, "et": end_time,
+            "sec": max(0, now_epoch - start[2]),
+        })
+        if len(sessions) > limit:
+            sessions.pop(0)
+    return sessions
+
+
+def _send_presence_sessions(cl):
+    _send_json(cl, _presence_sessions())
+
+
 def _send_presence_dashboard(cl):
     send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
     _send_file_chunks(cl, '/html/dashboard.bin')
@@ -1101,29 +1153,34 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
         cl.close()
         return
 
-    if method == "GET" and path == "/dashboard":
+    if method == "GET" and path in ("/desk", "/dashboard"):
         _send_presence_dashboard(cl)
         cl.close()
         return
 
-    if method == "GET" and path == "/presence/status":
+    if method == "GET" and path in ("/api/desk/status", "/presence/status"):
         manager = get_presence_manager()
-        status = manager.get_status() if manager else {"state": 0, "adc": -1, "threshold": -1, "session_seconds": 0, "segment_seconds": 0, "today_seconds": 0, "last_change_date": "", "last_change_time": "", "transitions": 0, "now_epoch": 0}
+        status = manager.get_status() if manager else {"state": 0, "current_date": "", "adc": -1, "threshold": -1, "session_seconds": 0, "segment_seconds": 0, "today_seconds": 0, "last_change_date": "", "last_change_time": "", "transitions": 0, "now_epoch": 0}
         _send_json(cl, status)
         cl.close()
         return
 
-    if method == "GET" and path == "/presence/events":
+    if method == "GET" and path in ("/api/desk/timeline", "/presence/events"):
         _send_presence_lines(cl, "events")
         cl.close()
         return
 
-    if method == "GET" and path == "/presence/daily":
+    if method == "GET" and path in ("/api/desk/daily", "/presence/daily"):
         _send_presence_lines(cl, "daily")
         cl.close()
         return
 
-    if method == "GET" and path == "/adc":
+    if method == "GET" and path == "/api/desk/sessions":
+        _send_presence_sessions(cl)
+        cl.close()
+        return
+
+    if method == "GET" and path in ("/api/debug/adc", "/adc"):
         adc_value = machine.ADC(machine.Pin(26)).read_u16()
         response = "HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n{\"adc\": " + str(adc_value) + "}"
         cl.send(response.encode())

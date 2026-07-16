@@ -10,6 +10,7 @@ DAILY_FILE = "presence_daily.log"
 PENDING_FILE = "presence_pending.log"
 PENDING_SESSION_FILE = "presence_session_pending.log"
 RETENTION_DAYS = 30
+DAILY_RETENTION_DAYS = 366
 DISCORD_FLUSH_INTERVAL_MS = 60 * 1000
 
 _presence_manager = None
@@ -278,6 +279,7 @@ class PresenceManager:
         today_total = self.today_seconds + session_seconds
         return {
             "state": 1 if self.current_state else 0,
+            "current_date": self.current_date or "",
             "adc": self.last_adc if self.last_adc is not None else -1,
             "threshold": self.last_threshold if self.last_threshold is not None else config_manager.get("user.light_threshold", 56000),
             "session_seconds": session_seconds,
@@ -643,10 +645,9 @@ class PresenceManager:
                 int(current_date[6:8]),
                 0, 0, 0, 0, 0
             )
-            min_epoch = time.mktime(current_tuple) - (RETENTION_DAYS - 1) * 86400
-            min_date_tuple = time.localtime(min_epoch)
-            min_date = _date_key(min_date_tuple)
-            _trim_by_date(EVENT_FILE, min_date)
-            _trim_by_date(DAILY_FILE, min_date)
+            event_min_epoch = time.mktime(current_tuple) - (RETENTION_DAYS - 1) * 86400
+            daily_min_epoch = time.mktime(current_tuple) - (DAILY_RETENTION_DAYS - 1) * 86400
+            _trim_by_date(EVENT_FILE, _date_key(time.localtime(event_min_epoch)))
+            _trim_by_date(DAILY_FILE, _date_key(time.localtime(daily_min_epoch)))
         except Exception as e:
             print("Presence: retention trim failed. {}".format(e))

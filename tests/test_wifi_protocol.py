@@ -293,6 +293,40 @@ class WifiProtocolTests(unittest.TestCase):
             self.module.get_presence_manager = original_manager
             self.module.iter_lines = original_iter_lines
 
+    def test_desk_sessions_are_derived_without_adc_debug_fields(self):
+        original_manager = self.module.get_presence_manager
+        original_iter_lines = self.module.iter_lines
+        original_presence_epoch = self.module._presence_epoch
+        try:
+            event_epochs = {"120000": 100, "121500": 1000, "122000": 1300, "123000": 1900}
+            self.module._presence_epoch = lambda _date, event_time: event_epochs[event_time]
+            end_epoch = event_epochs["123000"]
+            self.module.get_presence_manager = lambda: types.SimpleNamespace(
+                get_status=lambda: {"state": 1, "now_epoch": end_epoch}
+            )
+            self.module.iter_lines = lambda _path: iter((
+                "20260714,120000,1,321",
+                "20260714,121500,0,654",
+                "20260714,122000,1,333",
+            ))
+            sessions = self.module._presence_sessions()
+            self.assertEqual(sessions[0], {
+                "sd": "20260714", "st": "120000",
+                "ed": "20260714", "et": "121500", "sec": 900,
+            })
+            self.assertEqual(sessions[1]["st"], "122000")
+            expected_end = time.localtime(end_epoch)
+            self.assertEqual(
+                sessions[1]["et"],
+                "{:02d}{:02d}{:02d}".format(expected_end[3], expected_end[4], expected_end[5]),
+            )
+            self.assertEqual(sessions[1]["sec"], 600)
+            self.assertNotIn("a", sessions[0])
+        finally:
+            self.module.get_presence_manager = original_manager
+            self.module.iter_lines = original_iter_lines
+            self.module._presence_epoch = original_presence_epoch
+
 
 if __name__ == "__main__":
     unittest.main()
