@@ -5,6 +5,8 @@ import types
 import unittest
 from pathlib import Path
 
+from tools.pico_image_tool.image_codec import compress
+
 
 class NativeBuffer:
     def __init__(self):
@@ -97,6 +99,16 @@ class DisplayMappingTests(unittest.TestCase):
             self.module.draw_image(canvas, str(asset), 128, 128, 0, 0)
             data = asset.read_bytes()
             expected_first_row = [1 if data[x // 8] & (1 << (7 - x % 8)) else 0 for x in range(128)]
+            self.assertEqual([canvas.pixels[(x, 0)] for x in range(128)], expected_first_row)
+
+    def test_compressed_asset_uses_header_bit_order(self):
+        with tempfile.TemporaryDirectory() as temp:
+            asset = Path(temp) / "compressed.bin"
+            raw = bytes((index * 29) % 256 for index in range(2048))
+            asset.write_bytes(compress(raw, hlsb=True))
+            canvas = LogicalCanvas()
+            self.module.draw_image(canvas, str(asset), 128, 128, 0, 0)
+            expected_first_row = [1 if raw[x // 8] & (1 << (x % 8)) else 0 for x in range(128)]
             self.assertEqual([canvas.pixels[(x, 0)] for x in range(128)], expected_first_row)
 
     def test_display_workspace_is_reused_across_updates(self):

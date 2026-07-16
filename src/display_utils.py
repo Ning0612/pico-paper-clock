@@ -78,32 +78,37 @@ def draw_scaled_text(canvas, text, x, y, scale, color=0):
                     )
 
 def draw_image(canvas, image_path, src_width, src_height, x, y):
-    """Draws an image from a binary file onto the canvas."""
+    """Draw a legacy raw or PPC1-compressed image using one row at a time."""
     if not image_path:
         return
     try:
         expected_length = (src_width * src_height) // 8
         actual_length = os.stat(image_path)[6]
-        if actual_length != expected_length:
-            print("Error: Image data length mismatch for {}. Expected {}, got {}.".format(
-                image_path, expected_length, actual_length
-            ))
-            return
+        if actual_length == expected_length:
+            compressed = False
+        else:
+            compressed = True
         row_bytes = (src_width + 7) // 8
         row = _image_row_buffers.get(row_bytes)
         if row is None:
             row = bytearray(row_bytes)
         bytes_read = 0
-        # API uploads carry a sidecar marker for the canonical HLSB format.
-        # Headerless legacy/repository assets remain MSB-left for compatibility.
-        try:
-            os.stat(image_path + ".hlsb")
-            hlsb = True
-        except OSError:
-            hlsb = False
         with open(image_path, "rb") as f:
+            reader = f
+            hlsb = False
+            if compressed:
+                from image_codec import compressed_reader
+                reader, hlsb = compressed_reader(f, expected_length)
+            else:
+                # API uploads carry a sidecar marker for the canonical HLSB format.
+                # Headerless legacy/repository assets remain MSB-left for compatibility.
+                try:
+                    os.stat(image_path + ".hlsb")
+                    hlsb = True
+                except OSError:
+                    pass
             for py in range(src_height):
-                count = f.readinto(row)
+                count = reader.readinto(row)
                 if count != row_bytes:
                     break
                 bytes_read += count
@@ -111,6 +116,8 @@ def draw_image(canvas, image_path, src_width, src_height, x, y):
                     shift = px % 8 if hlsb else 7 - (px % 8)
                     value = (row[px // 8] >> shift) & 1
                     canvas.pixel(x + px, y + py, value)
+            if compressed and reader.pending_length:
+                raise ValueError("PPC1 match exceeds the declared image length.")
         if bytes_read != expected_length:
             print(f"Error: Image read ended early for {image_path}.")
             return

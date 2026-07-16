@@ -7,7 +7,7 @@ from tkinter import filedialog, messagebox, ttk
 from PIL import Image, ImageOps, ImageTk
 
 from .client import DeviceClient, discover
-from .conversion import ConversionOptions, convert_image, save_bin
+from .conversion import ConversionOptions, convert_image, save_compressed_bin
 
 
 class PicoImageTool(tk.Tk):
@@ -142,7 +142,7 @@ class PicoImageTool(tk.Tk):
             return
         path = filedialog.asksaveasfilename(defaultextension=".bin", initialfile=self.vars["name"].get(), filetypes=[("BIN", "*.bin")])
         if path:
-            save_bin(path, self.result.data)
+            save_compressed_bin(path, self.result.data)
             self.vars["status"].set("已儲存 " + path)
 
     def scan(self):
@@ -167,8 +167,8 @@ class PicoImageTool(tk.Tk):
             messagebox.showwarning("尚未轉檔", "請先選取圖片。")
             return
         local_path = self.source_path.with_suffix(".bin")
-        save_bin(local_path, self.result.data)
-        data = self.result.data
+        save_compressed_bin(local_path, self.result.data)
+        data = local_path.read_bytes()
         device = self.vars["device"].get()
         username = self.vars["username"].get()
         password = self.vars["password"].get()

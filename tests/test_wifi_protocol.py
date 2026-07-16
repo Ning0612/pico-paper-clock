@@ -1,10 +1,12 @@
 import importlib.util
 import json
 import sys
+import tempfile
 import time
 import types
 import unittest
 from pathlib import Path
+import gzip
 
 
 class FakeClient:
@@ -139,6 +141,16 @@ class WifiProtocolTests(unittest.TestCase):
             self.module.parse_query_string("label=在席"),
             {"label": "在席"},
         )
+
+    def test_html_asset_response_advertises_gzip(self):
+        with tempfile.TemporaryDirectory() as temp:
+            path = Path(temp) / "page.bin"
+            payload = gzip.compress(b"<!doctype html><p>ok</p>", mtime=0)
+            path.write_bytes(payload)
+            client = FakeClient()
+            self.module._send_html_file(client, str(path))
+            self.assertIn(b"Content-Encoding: gzip\r\n", client.sent)
+            self.assertTrue(client.sent.endswith(payload))
 
     @classmethod
     def tearDownClass(cls):

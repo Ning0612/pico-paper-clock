@@ -423,6 +423,13 @@ def _send_file_chunks(cl, path):
     except OSError as e:
         print("Error serving {}: {}".format(path, e))
 
+
+def _send_html_file(cl, path):
+    """Send a generated gzip HTML asset with its browser decoding header."""
+    send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n"
+                    b"Content-Encoding: gzip\r\nCache-Control: no-store\r\n\r\n")
+    _send_file_chunks(cl, path)
+
 def send_chunk(cl, data):
     """
     可靠地分段傳送資料，並加入微小延遲以防止緩衝區溢位。
@@ -1029,8 +1036,7 @@ def _send_presence_sessions(cl):
 
 
 def _send_presence_dashboard(cl):
-    send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
-    _send_file_chunks(cl, '/html/dashboard.bin')
+    _send_html_file(cl, '/html/dashboard.bin')
 
 def _save_settings_from_params(params):
     original_name = params.get("original_profile_name", "")
@@ -1126,8 +1132,7 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
     print("Request: {} {}".format(method, target.split("?", 1)[0]))
 
     if method == "GET" and path == "/login":
-        send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
-        _send_file_chunks(cl, "/html/login.bin")
+        _send_html_file(cl, "/html/login.bin")
         cl.close()
         return
 
@@ -1156,8 +1161,7 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
         return
 
     if method == "GET" and path == "/images":
-        send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
-        _send_file_chunks(cl, "/html/images.bin")
+        _send_html_file(cl, "/html/images.bin")
         cl.close()
         return
 
@@ -1169,8 +1173,7 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
         if not _admin_password_configured():
             send_chunk(cl, b"HTTP/1.0 302 Found\r\nLocation: /login\r\nCache-Control: no-store\r\n\r\n")
         else:
-            send_chunk(cl, b"HTTP/1.0 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nCache-Control: no-store\r\n\r\n")
-            _send_file_chunks(cl, "/html/settings.bin")
+            _send_html_file(cl, "/html/settings.bin")
         cl.close()
         return
 
@@ -1346,7 +1349,7 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
 
         try:
             factory_reset()
-            _send_file_chunks(cl, '/html/reset.bin')
+            _send_html_file(cl, '/html/reset.bin')
             cl.close()
             update_display_Restart()
             time.sleep(5)

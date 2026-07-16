@@ -1,3 +1,4 @@
+import gzip
 import unittest
 from pathlib import Path
 
@@ -8,9 +9,11 @@ class DashboardUiTests(unittest.TestCase):
         cls.source = (
             Path(__file__).resolve().parents[1] / "tools" / "html_src" / "dashboard.html"
         ).read_text(encoding="utf-8")
-        cls.asset = (
-            Path(__file__).resolve().parents[1] / "src" / "html" / "dashboard.bin"
-        ).read_text(encoding="utf-8")
+        asset_path = Path(__file__).resolve().parents[1] / "src" / "html" / "dashboard.bin"
+        payload = asset_path.read_bytes()
+        if payload[:2] != b"\x1f\x8b":
+            raise AssertionError("dashboard.bin is not a gzip asset")
+        cls.asset = gzip.decompress(payload).decode("utf-8")
 
     def test_data_load_precedes_optional_chart_interactions(self):
         load_position = self.source.index("await load();")

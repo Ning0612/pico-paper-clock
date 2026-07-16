@@ -4,7 +4,7 @@
 
 ## 資產目錄
 
-所有裝置圖片位於 `src/image/`，使用無檔頭 1-bit bitmap：
+所有裝置圖片位於 `src/image/`，以 1-bit bitmap 儲存。新工具會在 PPC1 壓縮後較小時使用壓縮格式；無法縮小時才保留 raw payload：
 
 | 路徑 | 用途 | 尺寸 |
 |---|---|---:|
@@ -33,10 +33,13 @@ CLI 範例：
 .\.venv\Scripts\python.exe tools\pico_image_cli.py upload holiday.png --device 192.168.1.50 --type events --event 1225
 ```
 
-工具支援 Floyd–Steinberg、Atkinson、Bayer 4x4、固定 threshold，以及 `cover`、`contain`、`stretch` 縮放策略；透明圖會先合成白底並套用 EXIF 方向。GUI/CLI 預設在原圖旁保留 `.bin`，方便在裝置清理後重新部署。
+工具支援 Floyd–Steinberg、Atkinson、Bayer 4x4、固定 threshold，以及 `cover`、`contain`、`stretch` 縮放策略；透明圖會先合成白底並套用 EXIF 方向。GUI/CLI 預設在原圖旁保留 PPC1 `.bin`，方便在裝置清理後重新部署。
 
 ## 格式與部署注意事項
 
-新工具與圖片 API 使用 canonical `MONO_HLSB`：每個 packed byte 的 bit 0 是最左側像素。工具與 API 會建立 `.hlsb` sidecar；使用 `upload.py` 或手動複製時，必須連同 sidecar 部署。沒有 marker 的既有資產仍按舊版 MSB-left 解碼，不需要批次重轉。
+raw payload 的 canonical `MONO_HLSB` 是每個 packed byte 的 bit 0 代表最左側像素。PPC1 header 會自行保存 bit order，裝置以 256-byte history、512-byte input buffer 與 row buffer 逐列解壓，不會配置整張圖片。
+
+- raw 圖片會使用 `.hlsb` sidecar 標記 HLSB；沒有 marker 的既有 raw 資產仍按舊版 MSB-left 解碼。
+- PPC1 檔案仍使用 `.bin` 副檔名，不需要 sidecar；`upload.py` 會直接部署 payload。
 
 圖片 API 目前支援 custom、login、events 三個 collection，尺寸與 byte length 請見 [`IMAGE_API.md`](IMAGE_API.md)。

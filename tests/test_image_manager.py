@@ -5,6 +5,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from tools.pico_image_tool.image_codec import compress
+
 
 class ImageStoreTests(unittest.TestCase):
     def setUp(self):
@@ -40,6 +42,18 @@ class ImageStoreTests(unittest.TestCase):
         self.assertFalse((directory / "sample.bin.bak").exists())
         self.assertTrue((directory / "sample.bin.hlsb").exists())
 
+    def test_upload_accepts_compressed_payload_without_sidecar(self):
+        raw = b"\x00\xff" * 1024
+        payload = compress(raw, hlsb=True)
+        result = self.store.upload(io.BytesIO(payload), "custom", "compressed.bin", len(payload))
+        target = Path(self.temp.name) / "custom" / "compressed.bin"
+        self.assertTrue(result["compressed"])
+        self.assertEqual(result["bytes"], len(payload))
+        self.assertEqual(result["uncompressed_bytes"], len(raw))
+        self.assertEqual(target.read_bytes(), payload)
+        self.assertFalse(Path(str(target) + ".hlsb").exists())
+        self.assertEqual(list(self.store.iter_images("custom")), [("compressed.bin", len(payload))])
+
     def test_recovery_restores_backup_when_target_is_missing(self):
         directory = Path(self.temp.name) / "custom"
         directory.mkdir(parents=True)
@@ -48,6 +62,16 @@ class ImageStoreTests(unittest.TestCase):
         self.assertEqual(self.store.recover_partial_uploads(), 1)
         self.assertTrue((directory / "lost.bin").exists())
         self.assertFalse(backup.exists())
+
+    def test_recovery_promotes_valid_compressed_part_without_marker(self):
+        directory = Path(self.temp.name) / "custom"
+        directory.mkdir(parents=True)
+        payload = compress(b"\x00\xff" * 1024, hlsb=True)
+        part = directory / "compressed.bin.part"
+        part.write_bytes(payload)
+        self.assertEqual(self.store.recover_partial_uploads(), 1)
+        self.assertEqual((directory / "compressed.bin").read_bytes(), payload)
+        self.assertFalse((directory / "compressed.bin.hlsb").exists())
 
     def test_recovery_never_promotes_hlsb_data_without_marker(self):
         directory = Path(self.temp.name) / "custom"

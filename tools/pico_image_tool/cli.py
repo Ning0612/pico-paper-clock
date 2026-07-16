@@ -5,7 +5,15 @@ import sys
 from pathlib import Path
 
 from .client import DeviceClient, DeviceError, discover
-from .conversion import ConversionOptions, DITHER_ALGORITHMS, FIT_MODES, TARGET_SPECS, convert_image, save_bin
+from .conversion import (
+    ConversionOptions,
+    DITHER_ALGORITHMS,
+    FIT_MODES,
+    TARGET_SPECS,
+    convert_image,
+    save_compressed_bin,
+)
+from .image_codec import decompress, is_compressed
 
 
 def _safe_filename(value: str) -> str:
@@ -102,25 +110,28 @@ def main(argv=None) -> int:
         if args.command == "convert":
             result = convert_image(args.input, _conversion_options(args))
             output = Path(args.output) if args.output else Path(args.input).with_suffix(".bin")
-            save_bin(output, result.data)
-            print(f"{output}\t{len(result.data)} bytes\t{result.width}x{result.height}")
+            save_compressed_bin(output, result.data)
+            print(f"{output}\t{output.stat().st_size} stored bytes\t{result.width}x{result.height}")
             return 0
         if args.command == "upload":
             source = Path(args.input)
             expected = TARGET_SPECS[args.type][0] * TARGET_SPECS[args.type][1] // 8
             if source.suffix.lower() == ".bin":
-                marker = Path(str(source) + ".hlsb")
-                if not marker.is_file():
-                    raise ValueError("Raw .bin upload requires the adjacent .bin.hlsb format marker.")
                 data = source.read_bytes()
-                if len(data) != expected:
-                    raise ValueError(f"Expected {expected} bytes for {args.type}, got {len(data)}.")
+                if is_compressed(data):
+                    decompress(data, expected)
+                else:
+                    marker = Path(str(source) + ".hlsb")
+                    if not marker.is_file():
+                        raise ValueError("Raw .bin upload requires the adjacent .bin.hlsb format marker.")
+                    if len(data) != expected:
+                        raise ValueError(f"Expected {expected} bytes for {args.type}, got {len(data)}.")
                 output = source
             else:
                 result = convert_image(source, _conversion_options(args))
-                data = result.data
                 output = Path(args.output) if args.output else source.with_suffix(".bin")
-                save_bin(output, data)
+                save_compressed_bin(output, result.data)
+                data = output.read_bytes()
             name = args.name or _safe_filename(source.name)
             if not name.endswith(".bin"):
                 name += ".bin"

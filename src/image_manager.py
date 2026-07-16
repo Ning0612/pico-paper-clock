@@ -3,6 +3,8 @@ import os
 import random
 import time
 
+from image_codec import inspect_file, validate_file
+
 
 IMAGE_ROOT = "/image"
 SAFE_FREE_BYTES = 32 * 1024
@@ -160,19 +162,21 @@ class ImageStore:
                 continue
             try:
                 validate_filename(filename)
-                size = os.stat(directory + "/" + filename)[6]
-            except (OSError, ImageStoreError, IndexError):
+                path = directory + "/" + filename
+                size = os.stat(path)[6]
+                inspect_file(path, expected)
+            except (OSError, ImageStoreError, IndexError, ValueError):
                 continue
-            if int(size) == expected:
-                yield filename, int(size)
+            yield filename, int(size)
 
     def upload(self, stream, collection, filename, content_length, event=None,
                overwrite=False, preview=False):
         width, height, expected_length = image_spec(collection)
-        if content_length != expected_length:
+        max_length = expected_length * 2 + 64
+        if content_length <= 0 or content_length > max_length:
             raise ImageStoreError(
                 "invalid_size",
-                "Expected {} bytes for {}x{} image.".format(expected_length, width, height)
+                "Expected a raw or PPC1-compressed {}x{} image.".format(width, height)
             )
 
         target = image_path(collection, filename, event)
@@ -180,7 +184,7 @@ class ImageStore:
             raise ImageStoreError("exists", "Image already exists.")
 
         free_bytes = filesystem_free(IMAGE_ROOT)
-        if free_bytes >= 0 and free_bytes - expected_length < SAFE_FREE_BYTES:
+        if free_bytes >= 0 and free_bytes - content_length < SAFE_FREE_BYTES:
             raise ImageStoreError("insufficient_storage", "Not enough device storage.")
 
         directory = image_directory(collection, event)
@@ -201,8 +205,8 @@ class ImageStore:
                 except OSError:
                     pass
 
-            remaining = expected_length
-            buffer = bytearray(min(UPLOAD_BUFFER_BYTES, expected_length))
+            remaining = content_length
+            buffer = bytearray(min(UPLOAD_BUFFER_BYTES, content_length))
             with open(part_path, "wb") as output:
                 while remaining:
                     requested = min(len(buffer), remaining)
@@ -216,10 +220,21 @@ class ImageStore:
                     remaining -= count
 
             actual_length = os.stat(part_path)[6]
-            if actual_length != expected_length:
+            if actual_length != content_length:
                 raise ImageStoreError("invalid_size", "Stored image length does not match request.")
-            with open(marker_part_path, "wb") as marker_file:
-                marker_file.write(b"1")
+            try:
+                compressed, _ = validate_file(part_path, expected_length)
+            except (OSError, ValueError):
+                raise ImageStoreError(
+                    "invalid_size",
+                    "Image payload is not a valid raw or PPC1-compressed {}x{} image.".format(
+                        width, height
+                    )
+                )
+            marker_needed = not compressed
+            if marker_needed:
+                with open(marker_part_path, "wb") as marker_file:
+                    marker_file.write(b"1")
             if hasattr(os, "sync"):
                 os.sync()
 
@@ -240,8 +255,9 @@ class ImageStore:
                 marker_moved = True
             os.rename(part_path, target)
             target_installed = True
-            os.rename(marker_part_path, marker_path)
-            marker_installed = True
+            if marker_needed:
+                os.rename(marker_part_path, marker_path)
+                marker_installed = True
             if hasattr(os, "sync"):
                 os.sync()
             if target_moved:
@@ -259,7 +275,9 @@ class ImageStore:
                 self.pending_preview = (target, width, height)
             return {
                 "path": target,
-                "bytes": expected_length,
+                "bytes": content_length,
+                "uncompressed_bytes": expected_length,
+                "compressed": compressed,
                 "replaced": replaced,
                 "preview_queued": bool(preview),
                 "catalog_generation": self.catalog_generation,
@@ -333,9 +351,8 @@ class ImageStore:
             raise ImageStoreError("not_found", "Image does not exist.")
         width, height, expected = image_spec(collection)
         try:
-            if os.stat(target)[6] != expected:
-                raise ImageStoreError("invalid_size", "Stored image size is invalid.")
-        except OSError:
+            inspect_file(target, expected)
+        except (OSError, ValueError):
             raise ImageStoreError("not_found", "Image does not exist.")
         self.pending_preview = (target, width, height)
         return target
@@ -391,10 +408,17 @@ class ImageStore:
                     if _exists(target):
                         if marker_part_path and not part_path:
                             try:
-                                os.remove(marker_path)
-                            except OSError:
-                                pass
-                            os.rename(marker_part_path, marker_path)
+                                target_compressed, _ = inspect_file(target, expected)
+                            except (OSError, ValueError):
+                                target_compressed = True
+                            if target_compressed:
+                                os.remove(marker_part_path)
+                            else:
+                                try:
+                                    os.remove(marker_path)
+                                except OSError:
+                                    pass
+                                os.rename(marker_part_path, marker_path)
                         if part_path:
                             os.remove(part_path)
                             if marker_part_path:
@@ -404,14 +428,19 @@ class ImageStore:
                         if marker_backup_path:
                             os.remove(marker_backup_path)
                         continue
-                    valid = (
-                        bool(part_path)
-                        and bool(marker_part_path)
-                        and os.stat(part_path)[6] == expected
-                    )
-                    if valid:
+                    valid_part = False
+                    part_compressed = False
+                    if part_path:
+                        try:
+                            part_compressed, _ = validate_file(part_path, expected)
+                            valid_part = True
+                        except (OSError, ValueError):
+                            valid_part = False
+                    if valid_part and (part_compressed or marker_part_path):
                         os.rename(part_path, target)
-                        if marker_part_path:
+                        if part_compressed and marker_part_path:
+                            os.remove(marker_part_path)
+                        elif marker_part_path:
                             os.rename(marker_part_path, marker_path)
                         recovered += 1
                         if backup_path:
@@ -419,6 +448,11 @@ class ImageStore:
                         if marker_backup_path:
                             os.remove(marker_backup_path)
                     elif backup_path:
+                        try:
+                            validate_file(backup_path, expected)
+                        except (OSError, ValueError):
+                            backup_path = None
+                    if not valid_part and backup_path:
                         os.rename(backup_path, target)
                         if marker_backup_path:
                             os.rename(marker_backup_path, marker_path)
@@ -470,9 +504,8 @@ class ImageCatalog:
                 continue
             full_path = directory + "/" + filename
             try:
-                if os.stat(full_path)[6] != expected:
-                    continue
-            except OSError:
+                inspect_file(full_path, expected)
+            except (OSError, ValueError):
                 continue
             fallback = full_path
             if full_path == previous:

@@ -14,9 +14,8 @@ tools/build_html.py  —  HTML source → src/html/*.bin 建置工具
 
 格式規則
 --------
-  - html_src 中的 .html 是完整的源碼，包含 HTTP 回應 header（若原 .bin 有的話）
-  - 例如 header.bin 在源碼第一行是：HTTP/1.0 200 OK\r\n...
-  - 建置時不會自動添加 HTTP header，源碼寫什麼就輸出什麼
+  - html_src 中的 .html 是完整的頁面源碼，不包含 HTTP 回應 header
+  - 建置後的 .bin 是 gzip payload；HTTP header 由韌體統一添加
 
 最小化策略
 ----------
@@ -24,10 +23,16 @@ tools/build_html.py  —  HTML source → src/html/*.bin 建置工具
   2. 每行去除前後空白
   3. 移除空行
   4. 相鄰行直接串接（HTML/CSS/JS 中換行不影響語意）
-  5. 若源碼以 HTTP response header 開頭，保留 header 的 CRLF 分隔
+  5. 若舊源碼仍以 HTTP response header 開頭，建置時移除該 header
+
+壓縮策略
+--------
+  - 使用 deterministic gzip（mtime=0），讓相同源碼產生穩定的 binary 產物
+  - 瀏覽器透過 HTTP Content-Encoding: gzip 自動解壓
 """
 
 import argparse
+import gzip
 import os
 import re
 import sys
@@ -42,14 +47,11 @@ def minify(text: str) -> str:
     # 使用非貪婪匹配以避免跨越多個注釋
     text = re.sub(r"<!--.*?-->", "", text, flags=re.DOTALL)
 
-    # reset/success 等獨立頁面會自己攜帶 HTTP response header。
-    # header 必須保留 CRLF，否則裝置直接串流 .bin 時瀏覽器無法辨識回應。
-    response_header = ""
+    # 舊版 reset/success 源碼可能自己攜帶 HTTP response header；
+    # 現在 header 由韌體統一發送，建置時只保留 HTML body。
     if text.startswith("HTTP/"):
         header_and_body = re.split(r"\r?\n\r?\n", text, maxsplit=1)
         if len(header_and_body) == 2:
-            header_lines = [line.strip() for line in header_and_body[0].splitlines() if line.strip()]
-            response_header = "\r\n".join(header_lines) + "\r\n\r\n"
             text = header_and_body[1]
 
     lines = []
@@ -58,7 +60,7 @@ def minify(text: str) -> str:
         if stripped:
             lines.append(stripped)
 
-    return response_header + "".join(lines)
+    return "".join(lines)
 
 
 def build_one(src_path: str, bin_path: str) -> int:
@@ -66,13 +68,13 @@ def build_one(src_path: str, bin_path: str) -> int:
     with open(src_path, "r", encoding="utf-8") as f:
         source = f.read()
 
-    output = minify(source)
+    output = gzip.compress(minify(source).encode("utf-8"), compresslevel=9, mtime=0)
 
     os.makedirs(os.path.dirname(bin_path), exist_ok=True)
     with open(bin_path, "wb") as f:
-        f.write(output.encode("utf-8"))
+        f.write(output)
 
-    return len(output.encode("utf-8"))
+    return len(output)
 
 
 def build_all(names: list[str] | None = None, verbose: bool = True) -> bool:
@@ -132,6 +134,12 @@ def init_from_bins(force: bool = False) -> None:
 
         with open(bin_path, "rb") as f:
             content = f.read()
+
+        try:
+            content = gzip.decompress(content)
+        except (OSError, EOFError):
+            # Accept legacy plain HTML assets during migration.
+            pass
 
         with open(src_path, "wb") as f:  # binary write 保留原始位元組
             f.write(content)

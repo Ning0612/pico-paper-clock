@@ -4,6 +4,8 @@ from typing import Tuple
 
 from PIL import Image, ImageOps
 
+from .image_codec import write_image
+
 
 TARGET_SPECS = {
     "custom": (128, 128),
@@ -180,3 +182,9 @@ def save_bin(path: str | Path, data: bytes) -> Path:
     output.write_bytes(data)
     Path(str(output) + ".hlsb").write_bytes(b"1")
     return output
+
+
+def save_compressed_bin(path: str | Path, data: bytes) -> Path:
+    """Save a bitmap using PPC1 when it is smaller than the raw payload."""
+    write_image(path, data, hlsb=True)
+    return Path(path)
