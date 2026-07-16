@@ -133,6 +133,13 @@ class WifiProtocolTests(unittest.TestCase):
         cls.module = importlib.util.module_from_spec(spec)
         spec.loader.exec_module(cls.module)
 
+    def test_unquote_preserves_unescaped_utf8_text(self):
+        self.assertEqual(self.module.unquote("名稱+Taipei"), "名稱 Taipei")
+        self.assertEqual(
+            self.module.parse_query_string("label=在席"),
+            {"label": "在席"},
+        )
+
     @classmethod
     def tearDownClass(cls):
         for name, module in cls.original_modules.items():

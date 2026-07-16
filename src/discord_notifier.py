@@ -10,17 +10,38 @@ PRESENCE_BAR_WIDTH = 10
 DISCORD_GC_THRESHOLD = 4096
 
 
+def _log_heap(label):
+    mem_free = getattr(gc, "mem_free", None)
+    if not callable(mem_free):
+        return
+    try:
+        free_bytes = mem_free()
+        mem_alloc = getattr(gc, "mem_alloc", None)
+        if callable(mem_alloc):
+            print("Memory {}: free={} bytes, allocated={} bytes.".format(
+                label, free_bytes, mem_alloc()
+            ))
+        else:
+            print("Memory {}: free={} bytes.".format(label, free_bytes))
+    except Exception:
+        pass
+
+
 def _write_all(sock, data):
     offset = 0
     data_length = len(data)
-    while offset < data_length:
-        written = sock.write(data[offset:])
-        if not written:
-            raise OSError("Discord socket closed during write.")
-        offset += written
+    view = memoryview(data)
+    try:
+        while offset < data_length:
+            written = sock.write(view[offset:])
+            if not written:
+                raise OSError("Discord socket closed during write.")
+            offset += written
+    finally:
+        del view
 
 def _json_string(value):
-    """Returns one JSON string encoded as UTF-8 bytes with control escaping."""
+    """Returns one JSON string encoded as a UTF-8 bytearray."""
     if not isinstance(value, str):
         value = str(value)
     buf = bytearray(b'"')
@@ -44,11 +65,14 @@ def _json_string(value):
         else:
             buf.append(byte)
     buf.extend(b'"')
-    return bytes(buf)
+    return buf
 
 
 def _discord_payload(message):
-    return b'{"content":' + _json_string(message) + b'}'
+    payload = bytearray(b'{"content":')
+    payload.extend(_json_string(message))
+    payload.append(ord('}'))
+    return payload
 
 
 def _presence_progress(total_seconds):
@@ -95,7 +119,7 @@ def _presence_summary_embed_payload(date, total_seconds, longest_seconds, sessio
     buf.extend(b'}],"color":')
     buf.extend(str(color).encode())
     buf.extend(b'}]}')
-    return bytes(buf)
+    return buf
 
 
 def _post_discord_webhook(webhook_url, payload):
@@ -111,6 +135,7 @@ def _post_discord_webhook(webhook_url, payload):
                 pass
             threshold(DISCORD_GC_THRESHOLD)
         gc.collect()
+        _log_heap("before Discord socket")
         parts = webhook_url.split("/", 3)
         if len(parts) != 4 or parts[0] != "https:":
             raise ValueError("Discord webhook URL must use https.")
@@ -126,6 +151,7 @@ def _post_discord_webhook(webhook_url, payload):
         del address
         del parts
         gc.collect()
+        _log_heap("before Discord TLS")
         tls_socket = ssl.wrap_socket(raw_socket, server_hostname=host)
         raw_socket = None
 

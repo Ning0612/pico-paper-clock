@@ -10,15 +10,33 @@ FORECAST_COUNTS = (24, 20, 16, 12, 8)
 FORECAST_READ_BUFFER_SIZE = 256
 MAX_FORECAST_ENTRY_BYTES = 2048
 
+
+def _log_heap(label):
+    mem_free = getattr(gc, "mem_free", None)
+    if not callable(mem_free):
+        return
+    try:
+        free_bytes = mem_free()
+        mem_alloc = getattr(gc, "mem_alloc", None)
+        if callable(mem_alloc):
+            print("Memory {}: free={} bytes, allocated={} bytes.".format(
+                label, free_bytes, mem_alloc()
+            ))
+        else:
+            print("Memory {}: free={} bytes.".format(label, free_bytes))
+    except Exception:
+        pass
+
 def _make_request_with_retry(url, max_retries=2, delay=2):
     """Makes an HTTP request with retry mechanism and error handling."""
     for attempt in range(max_retries):
         response = None
         try:
             gc.collect()
+            _log_heap("before weather request")
             response = urequests.get(url, timeout=5)
             if response.status_code == 200:
-                print(f"Memory available after request: {gc.mem_free()} bytes.")
+                _log_heap("after weather request")
                 result = response
                 response = None
                 return result
@@ -164,7 +182,10 @@ def _aggregate_forecast_stream(response, days_limit, timezone_offset):
         if processed_days >= days_limit:
             break
 
-        entry = ujson.loads(entry_bytes.decode())
+        try:
+            entry = ujson.loads(entry_bytes)
+        except (TypeError, ValueError):
+            entry = ujson.loads(entry_bytes.decode())
         dt = entry["dt"]
         local_time = time.localtime(dt + timezone_offset * 3600)
         month_day = "{:02d}-{:02d}".format(local_time[1], local_time[2])
@@ -218,6 +239,7 @@ def fetch_current_weather(api_key, location):
             condition = data["weather"][0]["main"]
             del data
             gc.collect()
+            _log_heap("after current weather parse")
 
             return temp, condition
         except (ValueError, AttributeError) as e:
@@ -235,6 +257,8 @@ def fetch_current_weather(api_key, location):
                 response.close()
             except Exception as e_close:
                 print(f"Error: Failed to close response for current weather request. Details: {e_close}")
+            response = None
+            gc.collect()
 
     return None
 
@@ -253,6 +277,7 @@ def fetch_weather_forecast(api_key, location, days_limit=4, timezone_offset=8):
         response = None
         try:
             gc.collect()
+            _log_heap("before forecast request")
             url = "{0}/forecast?q={1},TW&appid={2}&units=metric&cnt={3}".format(OPENWEATHER_BASE_URL, location, api_key, forecast_count)
             response = _make_request_with_retry(url)
 
@@ -265,6 +290,7 @@ def fetch_weather_forecast(api_key, location, days_limit=4, timezone_offset=8):
 
             result = _aggregate_forecast_stream(response, days_limit, timezone_offset)
             gc.collect()
+            _log_heap("after forecast parse")
             return result
 
         except (ValueError, AttributeError) as e:

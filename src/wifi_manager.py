@@ -325,7 +325,7 @@ def unquote(string):
     if not string:
         return ""
 
-    res = []
+    res = bytearray()
     i = 0
     n = len(string)
 
@@ -343,11 +343,15 @@ def unquote(string):
             res.append(ord(' '))
             i += 1
         else:
-            res.append(ord(char))
+            codepoint = ord(char)
+            if codepoint < 256:
+                res.append(codepoint)
+            else:
+                res.extend(char.encode('utf-8'))
             i += 1
 
     try:
-        return bytes(res).decode('utf-8')
+        return res.decode('utf-8')
     except:
         return string
 

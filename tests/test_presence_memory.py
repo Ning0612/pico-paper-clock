@@ -113,6 +113,40 @@ class PresenceMemoryTests(unittest.TestCase):
 
         self.assertEqual(manager.get_status()["current_date"], "20260715")
 
+    def test_read_lines_keeps_only_recent_entries(self):
+        original_event_file = self.module.EVENT_FILE
+        original_daily_file = self.module.DAILY_FILE
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                event_file = Path(directory) / "events.log"
+                daily_file = Path(directory) / "daily.log"
+                event_file.write_text(
+                    "\n".join(["x" * 257] + [
+                        "event-{}".format(index) for index in range(140)
+                    ]) + "\n",
+                    encoding="utf-8",
+                )
+                daily_file.write_text(
+                    "\n".join("daily-{}".format(index) for index in range(380)) + "\n",
+                    encoding="utf-8",
+                )
+                self.module.EVENT_FILE = str(event_file)
+                self.module.DAILY_FILE = str(daily_file)
+
+                events = self.module._read_lines(self.module.EVENT_FILE)
+                daily = self.module._read_lines(self.module.DAILY_FILE)
+
+                self.assertEqual(len(events), self.module.MAX_EVENT_LINES_IN_MEMORY)
+                self.assertNotIn("x" * 257, events)
+                self.assertEqual(events[0], "event-12")
+                self.assertEqual(events[-1], "event-139")
+                self.assertEqual(len(daily), self.module.MAX_DAILY_LINES_IN_MEMORY)
+                self.assertEqual(daily[0], "daily-14")
+                self.assertEqual(daily[-1], "daily-379")
+        finally:
+            self.module.EVENT_FILE = original_event_file
+            self.module.DAILY_FILE = original_daily_file
+
 
 if __name__ == "__main__":
     unittest.main()

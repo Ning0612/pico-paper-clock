@@ -44,6 +44,20 @@ class DiscordNotifierTests(unittest.TestCase):
         self.assertIn("🟦".encode("utf-8"), payload)
         self.assertEqual(len(payload), len(payload.decode("utf-8").encode("utf-8")))
 
+    def test_write_all_handles_partial_writes_without_copying_payload(self):
+        class PartialSocket:
+            def __init__(self):
+                self.received = bytearray()
+
+            def write(self, data):
+                chunk = bytes(data[:2])
+                self.received.extend(chunk)
+                return len(chunk)
+
+        sock = PartialSocket()
+        self.module._write_all(sock, bytearray(b"abcdef"))
+        self.assertEqual(sock.received, b"abcdef")
+
     def test_presence_embed_uses_exact_progress_colors_and_inline_fields(self):
         payload = self.module._presence_summary_embed_payload(
             "20260714", 51840, 7800, 4

@@ -12,6 +12,9 @@ PENDING_SESSION_FILE = "presence_session_pending.log"
 RETENTION_DAYS = 30
 DAILY_RETENTION_DAYS = 366
 DISCORD_FLUSH_INTERVAL_MS = 60 * 1000
+MAX_EVENT_LINES_IN_MEMORY = 128
+MAX_DAILY_LINES_IN_MEMORY = 366
+MAX_PRESENCE_LINE_CHARS = 256
 
 _presence_manager = None
 
@@ -42,9 +45,25 @@ def _epoch(t):
 
 
 def _read_lines(path):
+    limit = MAX_DAILY_LINES_IN_MEMORY if path == DAILY_FILE else MAX_EVENT_LINES_IN_MEMORY
+    lines = []
     try:
         with open(path, "r") as f:
-            return [line.strip() for line in f if line.strip()]
+            while True:
+                line = f.readline(MAX_PRESENCE_LINE_CHARS + 1)
+                if not line:
+                    break
+                if len(line) > MAX_PRESENCE_LINE_CHARS:
+                    while line and not line.endswith("\n"):
+                        line = f.readline(MAX_PRESENCE_LINE_CHARS + 1)
+                    continue
+                line = line.strip()
+                if not line:
+                    continue
+                lines.append(line)
+                if len(lines) > limit:
+                    del lines[0]
+            return lines
     except OSError:
         return []
 
@@ -69,6 +88,14 @@ def iter_lines(path):
                     yield line
     except OSError:
         return
+
+
+def _release_display_workspace_before_discord():
+    try:
+        from display_utils import release_display_workspace
+        release_display_workspace()
+    except Exception:
+        pass
 
 
 def _exists(path):
@@ -536,6 +563,9 @@ class PresenceManager:
         if time.ticks_diff(time.ticks_ms(), self.last_retry_ms) < DISCORD_FLUSH_INTERVAL_MS:
             return False
         self.last_retry_ms = time.ticks_ms()
+        if not self.pending_session and not self.pending_summary:
+            return False
+        _release_display_workspace_before_discord()
         sent = False
         if self.flush_summary_first:
             sent = self._retry_pending_summary(force=True)

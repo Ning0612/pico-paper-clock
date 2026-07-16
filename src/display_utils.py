@@ -8,10 +8,25 @@ DISPLAY_WIDTH = 296
 DISPLAY_HEIGHT = 128
 NATIVE_WIDTH = 128
 NATIVE_HEIGHT = 296
+NATIVE_BUFFER_BYTES = NATIVE_WIDTH * NATIVE_HEIGHT // 8
+
+_glyph_buffer = None
+_glyph = None
+_display_native_buffer = None
+_display_native_framebuffer = None
+_display_canvas = None
+_display_epd = None
+_image_row_buffers = {
+    4: bytearray(4),
+    16: bytearray(16),
+    37: bytearray(37),
+}
 
 
 class RotatedCanvas90:
     """296x128 logical canvas backed directly by the native 128x296 buffer."""
+    __slots__ = ("native", "width", "height")
+
     def __init__(self, native_framebuffer):
         self.native = native_framebuffer
         self.width = DISPLAY_WIDTH
@@ -37,9 +52,12 @@ class RotatedCanvas90:
 
 def draw_scaled_text(canvas, text, x, y, scale, color=0):
     """Draws scaled text on the canvas."""
+    global _glyph_buffer, _glyph
     scale = max(1, int(scale))
-    glyph_buf = bytearray(8)
-    glyph = framebuf.FrameBuffer(glyph_buf, 8, 8, framebuf.MONO_HLSB)
+    if _glyph is None:
+        _glyph_buffer = bytearray(8)
+        _glyph = framebuf.FrameBuffer(_glyph_buffer, 8, 8, framebuf.MONO_HLSB)
+    glyph = _glyph
     for index, char in enumerate(str(text)):
         glyph.fill(1 - color)
         glyph.text(char, 0, 0, color)
@@ -72,7 +90,9 @@ def draw_image(canvas, image_path, src_width, src_height, x, y):
             ))
             return
         row_bytes = (src_width + 7) // 8
-        row = bytearray(row_bytes)
+        row = _image_row_buffers.get(row_bytes)
+        if row is None:
+            row = bytearray(row_bytes)
         bytes_read = 0
         # API uploads carry a sidecar marker for the canonical HLSB format.
         # Headerless legacy/repository assets remain MSB-left for compatibility.
@@ -105,24 +125,36 @@ def clear_region(canvas, x1, y1, x2, y2):
     height = y2 - y1
     canvas.fill_rect(x1, y1, width, height, 1)
 
+
+def release_display_workspace():
+    """Releases the large display workspace before a memory-sensitive network call."""
+    global _display_native_buffer, _display_native_framebuffer, _display_canvas, _display_epd
+    _display_canvas = None
+    _display_native_framebuffer = None
+    _display_native_buffer = None
+    _display_epd = None
+
+
 def display_rotated_screen(draw_callback, angle=90, partial_update=False):
     """Displays content on the e-paper screen with rotation."""
+    global _display_native_buffer, _display_native_framebuffer, _display_canvas, _display_epd
     from epaper import EPD_2in9
     if angle != 90:
         raise ValueError("Only the device's native 90-degree layout is supported.")
-    native_buf = bytearray(NATIVE_WIDTH * NATIVE_HEIGHT // 8)
-    native_fb = framebuf.FrameBuffer(native_buf, NATIVE_WIDTH, NATIVE_HEIGHT, framebuf.MONO_HLSB)
-    native_fb.fill(1)
-    canvas = RotatedCanvas90(native_fb)
-    draw_callback(canvas)
-    epd = EPD_2in9()
-    epd.init()
+    if _display_native_framebuffer is None:
+        _display_native_buffer = bytearray(NATIVE_BUFFER_BYTES)
+        _display_native_framebuffer = framebuf.FrameBuffer(
+            _display_native_buffer, NATIVE_WIDTH, NATIVE_HEIGHT, framebuf.MONO_HLSB
+        )
+        _display_canvas = RotatedCanvas90(_display_native_framebuffer)
+    if _display_epd is None:
+        _display_epd = EPD_2in9()
+
+    _display_native_framebuffer.fill(1)
+    draw_callback(_display_canvas)
+    _display_epd.init()
     if partial_update:
-        epd.display_Partial(native_buf)
+        _display_epd.display_Partial(_display_native_buffer)
     else:
-        epd.display_Base(native_buf)
-    native_buf = None
-    native_fb = None
-    canvas = None
-    epd = None
+        _display_epd.display_Base(_display_native_buffer)
     gc.collect()

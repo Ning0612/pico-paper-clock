@@ -5,6 +5,7 @@ from config_manager import config_manager
 from netutils import sync_time, get_local_time
 from weather import fetch_current_weather, fetch_weather_forecast
 from display_manager import update_page_weather, update_page_time_image, update_page_birthday, update_page_image_preview
+from display_utils import release_display_workspace
 from image_manager import image_catalog, image_store
 from wifi_manager import reset_wifi_and_reboot
 from chime import Chime
@@ -151,6 +152,7 @@ class AppController:
         print("Info: Sending delayed Discord LAN IP notification.")
         self.startup_discord_last_attempt_ms = time.ticks_ms()
         self.startup_discord_attempted = True
+        release_display_workspace()
         result = send_lan_ip(self.lan_ip)
         if result is None:
             print("Warning: Discord LAN IP notification hit ENOMEM; will retry later.")
