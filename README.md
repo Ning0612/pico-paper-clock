@@ -6,9 +6,28 @@
 [![Hardware](https://img.shields.io/badge/Hardware-Raspberry%20Pi%20Pico%20W-red.svg)](https://www.raspberrypi.com/products/raspberry-pi-pico-w/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-基於 Raspberry Pi Pico W 與 Waveshare 2.9 吋觸控電子紙的 IoT 時鐘。裝置可同步網路時間、顯示天氣與室內溫濕度，也能輪播自訂圖片，並透過 Wi-Fi 提供設定、圖片管理與在席統計頁面。
+基於 Raspberry Pi Pico W 與 Waveshare 2.9 吋觸控電子紙的 IoT 時鐘。它定位成放在書桌前、低干擾常駐的小顯示器：讓人抬頭即可看到日期、時間、目前天氣、室內溫濕度與喜歡的圖片，也能透過環境光感測器估算並追蹤在書桌前的時間。裝置同時透過 Wi-Fi 提供設定、圖片管理與在席統計頁面。
 
 ![Project Demo](DEMO.jpg)
+
+## Web UI 預覽
+
+裝置在 AP 或 LAN 模式提供 Web UI，讓日常使用不必重新刷寫韌體即可管理顯示內容與查看書桌前活動：
+
+- **裝置設定**：管理 Wi-Fi profile、天氣地點、圖片輪播、感測器與提示音，以及 AP 管理選項。
+- **書桌前分析**：查看目前在席狀態、最近 24 小時與 30 天統計、年度熱力圖、每日紀錄和最近時段。
+- **圖片庫**：瀏覽 custom、events、login 圖片，預覽或刪除裝置上的素材；圖片上傳由 Pico Image Tool 處理。
+
+<table>
+  <tr>
+    <td align="center"><img src="docs/screenshots/webui/settings.png" alt="裝置設定頁" width="480"><br><sub>裝置設定</sub></td>
+    <td align="center"><img src="docs/screenshots/webui/desk-analytics-overview.png" alt="書桌前分析總覽" width="480"><br><sub>書桌前分析：即時狀態與近期統計</sub></td>
+  </tr>
+  <tr>
+    <td align="center"><img src="docs/screenshots/webui/desk-analytics-history.png" alt="書桌前分析歷史資料" width="480"><br><sub>書桌前分析：年度熱力圖與歷史紀錄</sub></td>
+    <td align="center"><img src="docs/screenshots/webui/image-library.png" alt="圖片庫頁面" width="480"><br><sub>圖片庫</sub></td>
+  </tr>
+</table>
 
 ## 功能概覽
 
