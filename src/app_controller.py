@@ -53,6 +53,10 @@ class AppController:
             discord_sender=send_presence_summary,
             session_sender=send_presence_session
         )
+        # Let the display, sensor, and server objects settle before the first
+        # pending Discord retry; the startup webhook already used the safe
+        # low-memory window.
+        self.presence.last_retry_ms = time.ticks_ms()
         set_presence_manager(self.presence)
 
 

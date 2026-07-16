@@ -12,7 +12,7 @@ main.py
        └─ LanConfigServer / AP web server → wifi_manager dispatcher
 ```
 
-啟動時先復原圖片交易檔，再連線、同步 NTP 時間並嘗試發送 Discord LAN IP 通知；通知完成後才載入控制器、顯示與感測器工作路徑，最後建立 LAN server。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
+啟動時先連線、同步 NTP 時間並嘗試發送 Discord LAN IP 通知；在載入控制器、顯示與感測器工作路徑前，會利用低記憶體窗口 flush pending Discord queue，再復原圖片交易檔並建立 LAN server。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
 
 ## 記憶體邊界
 
@@ -21,7 +21,7 @@ main.py
 - SPI 傳送使用 buffer write，避免逐 byte 建立暫時物件。
 - 長生命週期 controller、presence、image store/catalog 使用 `__slots__`。
 - Discord webhook 不使用 `urequests.Response` 路徑，改用 raw `ssl` socket：只建立固定大小的 HTTP headers/payload、處理 partial write、讀取 status line 後立即關閉 socket；送出前後執行 `gc.collect()`，並暫時調整 GC threshold 後恢復原值。NTP 會在第一次 TLS 呼叫前同步；目前 firmware tree 尚未附帶 CA trust anchor，因此此連線仍不能宣稱完成憑證鏈／hostname 驗證，正式部署前需補上 CA bundle，不能以不驗證的 TLS 取代。
-- 啟動通知在 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試。
+- 啟動通知與 pending Discord queue 在 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試，pending queue 則保留到下一次可用窗口。
 - Discord `ENOMEM` 會回傳可重試結果；presence queue 在記憶體壓力後暫停一個 flush interval，之後自動恢復嘗試，不丟棄 pending session/summary。
 - DHT22 使用 2500 ms 最小讀取間隔；讀取失敗改用 10 秒 backoff，保留上一筆快取值，避免感測器錯誤反覆消耗 heap 與刷 serial log。
 - 天氣預報使用 256-byte 固定串流 buffer 與 `readinto()`，逐筆解析 forecast entry；response、entry 暫存物件在處理後釋放並回收，避免一次載入完整 JSON 文件。

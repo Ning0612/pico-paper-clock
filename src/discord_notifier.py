@@ -120,8 +120,12 @@ def _post_discord_webhook(webhook_url, payload):
         address = addr_info[-1]
 
         raw_socket = socket.socket(addr_info[0], addr_info[1], addr_info[2])
+        del addr_info
         raw_socket.settimeout(10)
         raw_socket.connect(address)
+        del address
+        del parts
+        gc.collect()
         tls_socket = ssl.wrap_socket(raw_socket, server_hostname=host)
         raw_socket = None
 

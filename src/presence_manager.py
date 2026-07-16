@@ -548,6 +548,21 @@ class PresenceManager:
         self.flush_summary_first = not self.flush_summary_first
         return sent
 
+    def flush_startup_discord(self, max_messages=8):
+        """Flush pending notifications before display and sensor objects load."""
+        sent_count = 0
+        while sent_count < max_messages:
+            if self.pending_session:
+                sent = self._retry_pending_session(force=True)
+            elif self.pending_summary:
+                sent = self._retry_pending_summary(force=True)
+            else:
+                break
+            if not sent:
+                break
+            sent_count += 1
+        return sent_count
+
     def _queue_session(self, session_summary):
         session_line = self._session_line(session_summary)
         self._save_pending_session(session_line)

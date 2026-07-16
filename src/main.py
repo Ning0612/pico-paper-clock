@@ -4,10 +4,6 @@ import gc
 from wifi_manager import wifi_manager, create_lan_config_server
 from netutils import sync_time
 from discord_notifier import send_lan_ip
-from image_manager import image_store
-
-
-_startup_recovered = image_store.recover_partial_uploads()
 
 
 # Keep the first TLS allocation ahead of the display, sensor, weather, and
@@ -23,6 +19,18 @@ if _startup_network_connected:
     gc.collect()
     sync_time()
     _startup_discord_sent = send_lan_ip(_startup_lan_ip) is True
+    from discord_notifier import send_presence_session, send_presence_summary
+    from presence_manager import PresenceManager
+
+    startup_presence = PresenceManager(
+        discord_sender=send_presence_summary,
+        session_sender=send_presence_session
+    )
+    flushed = startup_presence.flush_startup_discord()
+    if flushed:
+        print("Info: Flushed {} pending Discord notification(s) before app init.".format(flushed))
+    startup_presence = None
+    gc.collect()
 _startup_wlan = None
 
 
@@ -32,9 +40,12 @@ def main():
     from app_state import AppState
     from hardware_manager import HardwareManager
     from app_controller import AppController
+    from image_manager import image_store
 
-    if _startup_recovered:
-        print("Recovered {} interrupted image transaction(s).".format(_startup_recovered))
+    recovered = image_store.recover_partial_uploads()
+
+    if recovered:
+        print("Recovered {} interrupted image transaction(s).".format(recovered))
 
     # Initial display and hardware setup follows the memory-sensitive webhook.
     update_page_loading(False)

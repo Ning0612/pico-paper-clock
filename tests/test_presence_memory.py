@@ -1,5 +1,6 @@
 import importlib.util
 import sys
+import tempfile
 import time
 import types
 import unittest
@@ -55,6 +56,31 @@ class PresenceMemoryTests(unittest.TestCase):
         self.assertFalse(manager.flush_discord())
         self.assertTrue(manager.discord_disabled)
         self.assertFalse(manager.flush_discord())
+
+    def test_startup_flush_drains_pending_session_and_summary_files(self):
+        original_pending = self.module.PENDING_FILE
+        original_session_pending = self.module.PENDING_SESSION_FILE
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                self.module.PENDING_FILE = str(Path(directory) / "summary.log")
+                self.module.PENDING_SESSION_FILE = str(Path(directory) / "session.log")
+                Path(self.module.PENDING_FILE).write_text("20260715,1,1,1,1\n", encoding="utf-8")
+                Path(self.module.PENDING_SESSION_FILE).write_text(
+                    "20260715,090000,20260715,090100,60\n", encoding="utf-8"
+                )
+                sent = []
+                manager = self.module.PresenceManager(
+                    discord_sender=lambda summary: sent.append(("summary", summary)) or True,
+                    session_sender=lambda *values: sent.append(("session", values)) or True,
+                )
+
+                self.assertEqual(manager.flush_startup_discord(), 2)
+                self.assertEqual([kind for kind, _value in sent], ["session", "summary"])
+                self.assertEqual(Path(self.module.PENDING_FILE).read_text(encoding="utf-8"), "")
+                self.assertEqual(Path(self.module.PENDING_SESSION_FILE).read_text(encoding="utf-8"), "")
+        finally:
+            self.module.PENDING_FILE = original_pending
+            self.module.PENDING_SESSION_FILE = original_session_pending
 
     def test_daily_retention_covers_year_heatmap_without_extending_events(self):
         manager = self.module.PresenceManager(

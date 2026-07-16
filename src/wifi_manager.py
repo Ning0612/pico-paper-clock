@@ -8,12 +8,7 @@ import hashlib
 import os
 import ujson
 import ubinascii
-from display_manager import update_display_Restart, update_display_AP
 from config_manager import config_manager
-from chime import Chime
-from hardware_manager import HardwareManager
-from presence_manager import get_presence_manager, iter_lines
-from image_manager import IMAGE_SPECS, ImageStoreError, filesystem_free, image_store
 
 API_VERSION = 1
 _REBOOT_REQUESTED = False
@@ -41,6 +36,16 @@ _SESSION_LAST_ACTIVITY_MS = None
 _SESSION_CSRF_TOKEN = None
 _LOGIN_FAILURES = {}
 _RESET_FAILURES = {}
+
+
+def get_presence_manager():
+    from presence_manager import get_presence_manager as _get_presence_manager
+    return _get_presence_manager()
+
+
+def iter_lines(path):
+    from presence_manager import iter_lines as _iter_lines
+    return _iter_lines(path)
 
 
 def _ticks_add(value, delta):
@@ -281,6 +286,8 @@ _migrate_legacy_password()
 
 def reset_wifi_and_reboot():
     """Sets force AP mode flag and reboots to enter configuration mode."""
+    from display_manager import update_display_Restart
+
     print("Long press detected. Entering AP mode for configuration...")
 
     # Set force AP mode flag
@@ -538,6 +545,8 @@ def _config_payload(profile_name=None):
 
 
 def _handle_config_api(cl, request, require_auth):
+    from image_manager import ImageStoreError
+
     global _REBOOT_REQUESTED
     method, target = _request_line(request)
     path = target.split("?", 1)[0]
@@ -795,6 +804,8 @@ def _api_error_status(code):
 
 
 def _parse_image_resource(path):
+    from image_manager import ImageStoreError
+
     parts = [part for part in path.split("/") if part]
     if len(parts) < 5 or parts[:3] != ["api", "v1", "images"]:
         raise ImageStoreError("not_found", "Image resource was not found.")
@@ -810,6 +821,8 @@ def _parse_image_resource(path):
 
 
 def _send_image_list(cl, collection, event):
+    from image_manager import filesystem_free, image_store
+
     send_chunk(cl, b'HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n\r\n{"items":[')
     first = True
     for filename, size in image_store.iter_images(collection, event):
@@ -824,6 +837,8 @@ def _send_image_list(cl, collection, event):
 
 
 def _handle_image_api(cl, request, require_auth=False):
+    from image_manager import IMAGE_SPECS, ImageStoreError, filesystem_free, image_store
+
     method, target = _request_line(request)
     path = target.split("?", 1)[0]
     if path == "/api/v1/device" and method == "GET":
@@ -1096,6 +1111,8 @@ def _save_settings_from_params(params):
         _clear_session()
 
 def handle_config_request(cl, request, require_auth=False, client_key="unknown"):
+    from display_manager import update_display_Restart
+
     if not request:
         cl.close()
         return
@@ -1200,6 +1217,8 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
             return
 
         try:
+            from chime import Chime
+
             chime_obj = Chime()
             chime_obj.do_chime(
                 pitch=int(params.get("pitch", "880")),
@@ -1358,6 +1377,8 @@ class LanConfigServer:
             request = _read_http_request(cl)
             handle_config_request(cl, request, require_auth=True, client_key=addr[0])
             if _consume_reboot_request():
+                from display_manager import update_display_Restart
+
                 update_display_Restart()
                 time.sleep(1)
                 machine.reset()
@@ -1394,6 +1415,10 @@ def create_lan_config_server():
 
 def run_web_server():
     """Run the shared configuration server while AP-mode lifecycle hooks stay active."""
+    from display_manager import update_display_Restart
+    from hardware_manager import HardwareManager
+    from image_manager import image_store
+
     addr = socket.getaddrinfo("0.0.0.0", 80)[0][-1]
     server = socket.socket()
     server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
@@ -1448,6 +1473,8 @@ def run_web_server():
                 from display_manager import update_page_image_preview
                 update_page_image_preview(preview[0], preview[1], preview[2])
             if _consume_reboot_request():
+                from display_manager import update_display_Restart
+
                 update_display_Restart()
                 time.sleep(1)
                 server.close()
@@ -1486,6 +1513,8 @@ def wifi_manager():
 
         ap.config(ssid=ap_ssid, password=ap_password)
         ap.ifconfig(('192.168.4.1', '255.255.255.0', '192.168.4.1', '192.168.4.1'))
+
+        from display_manager import update_display_AP
 
         update_display_AP(ap_ssid, ap_password, '192.168.4.1')
 
@@ -1587,6 +1616,8 @@ def wifi_manager():
 
     ap.config(ssid=ap_ssid, password=ap_password)
     ap.ifconfig(('192.168.4.1', '255.255.255.0', '192.168.4.1', '192.168.4.1'))
+
+    from display_manager import update_display_AP
 
     update_display_AP(ap_ssid, ap_password, '192.168.4.1')
 
