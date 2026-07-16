@@ -1,5 +1,6 @@
 import json
 import ipaddress
+import subprocess
 import threading
 from unittest.mock import Mock, patch
 from urllib.parse import parse_qs
@@ -100,12 +101,22 @@ class ClientTests(unittest.TestCase):
     @patch("tools.pico_image_tool.client.os.name", "nt")
     @patch("tools.pico_image_tool.client.subprocess.run")
     def test_windows_network_probes_hide_console_windows(self, run):
+        class FakeStartupInfo:
+            def __init__(self):
+                self.dwFlags = 0
+                self.wShowWindow = None
+
         run.return_value = Mock(returncode=0)
 
-        self.assertEqual(_ping_host("192.168.1.114", 0.5), "192.168.1.114")
+        with patch.object(subprocess, "STARTUPINFO", FakeStartupInfo, create=True), \
+                patch.object(subprocess, "STARTF_USESHOWWINDOW", 0x00000001, create=True), \
+                patch.object(subprocess, "SW_HIDE", 0, create=True), \
+                patch.object(subprocess, "CREATE_NO_WINDOW", 0x08000000, create=True):
+            self.assertEqual(_ping_host("192.168.1.114", 0.5), "192.168.1.114")
 
         kwargs = run.call_args.kwargs
-        self.assertEqual(kwargs["creationflags"], getattr(__import__("subprocess"), "CREATE_NO_WINDOW", 0))
+        self.assertEqual(kwargs["creationflags"], 0x08000000)
+        self.assertEqual(kwargs["startupinfo"].dwFlags, 0x00000001)
         self.assertEqual(kwargs["startupinfo"].wShowWindow, 0)
 
     @patch("tools.pico_image_tool.client.DeviceClient.info")

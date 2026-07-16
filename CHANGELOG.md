@@ -7,6 +7,8 @@
 
 ## [Unreleased]
 
+## [2.3.0] - 2026-07-17
+
 ### Added
 
 - 新增整合式 Pico Paper Clock 桌面 GUI，合併 USB/`mpremote` 資源部署、LAN/AP 圖片批次上傳、manifest 預覽與作業佇列。
@@ -22,6 +24,7 @@
 ### Fixed
 
 - 修正 Pico WebUI 登入回應中 `Set-Cookie` header 變數覆蓋 JSON body，導致圖片工具收到 cookie 字串而無法建立 session 的問題。
+- 修正 Linux CI runner 執行 Windows subprocess console-hide 測試時缺少 `STARTUPINFO` 造成的跨平台失敗。
 
 ## [2.2.0] - 2026-07-17
 
