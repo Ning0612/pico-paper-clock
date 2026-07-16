@@ -4,6 +4,7 @@ import re
 import sys
 from pathlib import Path
 
+from . import __version__
 from .client import DeviceClient, DeviceError, discover
 from .conversion import (
     ConversionOptions,
@@ -53,13 +54,13 @@ def _add_device_options(parser):
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="pico-image-tool", description="Convert and manage Pi Paper Clock images.")
-    parser.add_argument("--version", action="version", version="%(prog)s 1.0.0")
+    parser.add_argument("--version", action="version", version="%(prog)s " + __version__)
     commands = parser.add_subparsers(dest="command", required=True)
 
     commands.add_parser("gui", help="Open the desktop GUI.")
     discovery = commands.add_parser("discover", help="Find Pi Paper Clock devices on local /24 networks.")
     discovery.add_argument("--subnet", action="append", help="CIDR subnet; may be repeated and must be /24 or smaller.")
-    discovery.add_argument("--timeout", type=float, default=0.35)
+    discovery.add_argument("--timeout", type=float, default=5.0)
 
     convert = commands.add_parser("convert", help="Convert an image to canonical MONO_HLSB .bin.")
     convert.add_argument("input")
@@ -99,7 +100,10 @@ def main(argv=None) -> int:
     args = build_parser().parse_args(argv)
     try:
         if args.command == "gui":
-            from .gui import run_gui
+            try:
+                from pico_deploy.gui import run_gui
+            except ModuleNotFoundError:
+                from tools.pico_deploy.gui import run_gui
             run_gui()
             return 0
         if args.command == "discover":

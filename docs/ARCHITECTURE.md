@@ -71,7 +71,8 @@ main.py
 | `src/image/` | 裝置圖片資產 | 保留既有圖片；API runtime 圖片由裝置管理 |
 | `src/html/` | 生成後的 Web UI `.bin` | 由 `tools/html_src/` 建置 |
 | `tools/html_src/` | 可讀 HTML/CSS/JS 來源 | UI 修改只改這裡 |
-| `tools/pico_image_tool/` | 轉檔、抖動、client、GUI、CLI | 主機端 Python |
+| `tools/pico_image_tool/` | 圖片轉檔、抖動、codec、WebUI client、圖片 CLI | 主機端 Python |
+| `tools/pico_deploy/` | Pico USB/`mpremote` 部署核心、manifest、作業佇列與整合 GUI | 主機端 Python |
 | `tests/` | 主機回歸與協議測試 | 使用專案 `.venv` |
 | `docs/` | 長期文件與契約 | API／設定／架構同步更新 |
 | `dist/release-assets/` | 本地發布暫存的 UF2、STEP、STL 與 `.SLDPRT` | 已被 Git 忽略；建立 Release 時手動附加；不放回 source tree |
@@ -86,4 +87,4 @@ main.py
 
 本次記憶體路徑的最低驗證包括 host tests、`compileall`、`git diff --check`，以及 Pico W serial 中的 `Success: Discord LAN IP notification sent.`、DHT22 讀值與天氣請求成功。完整 peak heap 仍應以實際硬體長跑資料為準。
 
-桌面 EXE 由 `tools/build_image_tool.ps1` 建置。若使用 `--recursive-clean`，部署前要先保存裝置上只有 runtime 的圖片。
+Pico 部署工具 EXE 由 `tools/build_pico_deploy_tool.ps1` 建置，`tools/build_image_tool.ps1` 保留為相容別名。若使用遞迴清理，部署前要先保存裝置上只有 runtime 的圖片。

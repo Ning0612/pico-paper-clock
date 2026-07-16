@@ -769,8 +769,8 @@ def _send_json_status(cl, status, value, extra_headers=None):
         507: "Insufficient Storage",
     }.get(status, "Error")
     header = "HTTP/1.0 {} {}\r\nContent-Type: application/json\r\nCache-Control: no-store\r\n".format(status, reason)
-    for name, value in (extra_headers or {}).items():
-        header += "{}: {}\r\n".format(name, value)
+    for name, header_value in (extra_headers or {}).items():
+        header += "{}: {}\r\n".format(name, header_value)
     header += "\r\n"
     send_chunk(cl, header)
     send_chunk(cl, ujson.dumps(value))

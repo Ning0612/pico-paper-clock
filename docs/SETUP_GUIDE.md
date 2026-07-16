@@ -50,6 +50,22 @@ if (!(Test-Path src\config.json)) { Copy-Item src\config.json.example src\config
 
 `--recursive-clean` 會刪除只存在裝置上的網路上傳圖片，除非已完成備份，否則不要使用。REPL 中按 `Ctrl+X` 離開。
 
+## 整合式桌面上傳工具
+
+Windows 使用者可從 GitHub Release 下載 `PicoPaperClockTool` EXE；從 source tree 建置則執行：
+
+```powershell
+.\tools\build_pico_deploy_tool.ps1
+```
+
+在 GUI 的「工作階段連線」中選擇含有 `src/` 的 repository 或 source zip 解壓目錄，按「掃描序列埠」後從選單選擇 Pico；LAN/AP 則可掃描後選取或手動輸入。WebUI 帳號固定為 `admin`，只需輸入管理密碼。GUI 會提供：
+
+- 序列部署前以 Tree 預覽 manifest（本機／遠端路徑、分類與大小）、Python/JSON、WebUI、圖片與 config 選項。
+- LAN/AP 圖片批次轉檔、預覽、認證上傳與每張圖片獨立設定。
+- 由序列部署與圖片上傳組成的完整同步作業。
+
+GUI 預設不清理裝置，也不覆寫 `config.json`。遞迴清理與 config 覆寫會要求額外確認；密碼只保留在目前工作階段，不會寫入磁碟。
+
 ## AP 模式設定
 
 裝置在找不到任何已知 Wi-Fi 時會自動進入 AP 模式。正常運作時長按任一 HAT 按鈕約 3 秒，也會要求重啟並進入 AP 模式；這不會刪除 profile。

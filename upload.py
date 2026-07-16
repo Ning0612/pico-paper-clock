@@ -4,6 +4,15 @@ import argparse
 import time
 import shutil
 import sys
+from pathlib import Path
+
+from tools.pico_deploy.deployer import (
+    DeployOptions,
+    MpremoteRunner,
+    SerialDeployer,
+    build_deploy_plan,
+    format_bytes as format_deploy_bytes,
+)
 
 # 主控台編碼在非 UTF-8 locale（如繁體中文 Windows 的 cp950）下會讓含 emoji 的 print()
 # 拋出 UnicodeEncodeError，導致腳本在清除舊檔案後、上傳新檔案前崩潰，讓裝置卡在檔案不全的狀態。
@@ -113,51 +122,28 @@ def format_bytes(size):
     """
     格式化檔案大小顯示
     """
-    if size < 1024:
-        return f"{size} B"
-    elif size < 1024 * 1024:
-        return f"{size / 1024:.2f} KB"
-    else:
-        return f"{size / (1024 * 1024):.2f} MB"
+    return format_deploy_bytes(size)
+
+
+def _project_root():
+    source = Path(SOURCE_DIR)
+    return source.parent if source.name.lower() == "src" else source
 
 def collect_files():
     """
     收集要上傳的檔案，並統計檔案大小
     """
-    all_files = []
-
-    for root, dirs, files in os.walk(SOURCE_DIR):
-        for file in files:
-            if NO_CONFIG and file == "config.json":
-                continue
-            if any(file.endswith(ext) for ext in INCLUDE_EXTENSIONS):
-                full_path = os.path.join(root, file).replace("\\", "/")
-                rel_path = os.path.relpath(full_path, SOURCE_DIR).replace("\\", "/")
-                file_size = os.path.getsize(full_path)
-                all_files.append((full_path, rel_path, file_size))
-
-    if UPLOAD_IMAGES:
-        image_dir = os.path.join(SOURCE_DIR, "image")
-        if os.path.exists(image_dir):
-            for root, dirs, files in os.walk(image_dir):
-                for file in files:
-                    if file.endswith(".bin") or file.endswith(".bin.hlsb"):
-                        full_path = os.path.join(root, file).replace("\\", "/")
-                        rel_path = os.path.relpath(full_path, SOURCE_DIR).replace("\\", "/")
-                        file_size = os.path.getsize(full_path)
-                        all_files.append((full_path, rel_path, file_size))
-
-    html_dir = os.path.join(SOURCE_DIR, "html")
-    if os.path.exists(html_dir):
-        for root, dirs, files in os.walk(html_dir):
-            for file in files:
-                if file.endswith(".bin"):
-                    full_path = os.path.join(root, file).replace("\\", "/")
-                    rel_path = os.path.relpath(full_path, SOURCE_DIR).replace("\\", "/")
-                    file_size = os.path.getsize(full_path)
-                    all_files.append((full_path, rel_path, file_size))
-
-    return all_files
+    options = DeployOptions(
+        source_root=_project_root(),
+        include_code=True,
+        include_config=not NO_CONFIG,
+        include_images=UPLOAD_IMAGES,
+        include_webui=True,
+        clean_mode="none",
+        reset_after=True,
+    )
+    plan = build_deploy_plan(options)
+    return [(str(entry.local_path), entry.remote_path, entry.size) for entry in plan.entries]
 
 def ensure_remote_dirs(path, created_dirs):
     """
@@ -392,48 +378,25 @@ def reset_device():
     run_command(base_cmd + ["reset"], display_output=True)
 
 def upload_files():
+    options = DeployOptions(
+        source_root=_project_root(),
+        include_code=True,
+        include_config=not NO_CONFIG,
+        include_images=UPLOAD_IMAGES,
+        include_webui=True,
+        clean_mode="none",
+        reset_after=True,
+    )
+    plan = build_deploy_plan(options)
+    print(f"📦 共 {len(plan.entries)} 個檔案要上傳，總大小: {format_bytes(plan.total_size)}")
+    try:
+        SerialDeployer(MpremoteRunner(MPREMOTE_PORT)).deploy(plan, options, log=print)
+    except Exception as exc:
+        print(f"❌ 上傳失敗：{exc}")
+        return False
+
+    # Keep the historical CLI behavior: enter REPL after a successful reset.
     base_cmd = get_mpremote_base()
-
-    file_list = collect_files()
-    total_files = len(file_list)
-    total_size = sum(file_size for _, _, file_size in file_list)
-    
-    print(f"📦 共 {total_files} 個檔案要上傳，總大小: {format_bytes(total_size)}")
-
-    # 建立目錄記錄字典
-    created_dirs = {}
-    uploaded_size = 0
-
-    for i, (local_path, remote_path, file_size) in enumerate(file_list):
-        current_file_num = i + 1
-        
-        # 根據檔案大小計算進度
-        progress_percent = (uploaded_size / total_size) * 100 if total_size > 0 else 0
-
-        # 建立目錄
-        dirs = os.path.dirname(remote_path)
-        if dirs:
-            current_command_text = f"建立目錄: :{dirs}"
-            _print_progress_line(current_command_text, progress_percent)
-            ensure_remote_dirs(dirs, created_dirs)
-
-        # 上傳檔案
-        cmd = base_cmd + ["fs", "cp", local_path, f":{remote_path}"]
-        current_command_text = f"上傳檔案: {remote_path}"
-        _print_progress_line(current_command_text, progress_percent, file_size)
-        
-        if not run_command(cmd, display_output=False):
-            _clear_current_line()
-            print(f"❌ 上傳失敗: {remote_path}")
-            return False
-        
-        uploaded_size += file_size
-        
-    _clear_current_line()
-    print(f"\n✅ 上傳完成。總共上傳 {format_bytes(total_size)}")
-
-    # 重啟裝置
-    reset_device()
     if not interactive_repl(base_cmd):
         return False
     return True

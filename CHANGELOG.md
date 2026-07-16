@@ -7,6 +7,22 @@
 
 ## [Unreleased]
 
+### Added
+
+- 新增整合式 Pico Paper Clock 桌面 GUI，合併 USB/`mpremote` 資源部署、LAN/AP 圖片批次上傳、manifest 預覽與作業佇列。
+- 新增完整同步流程：序列部署重啟後輪詢裝置網路，恢復連線後再執行圖片上傳。
+
+### Changed
+
+- 序列部署 manifest 與 mpremote 執行核心可由 GUI 與 `upload.py` 共用；GUI 預設不清理裝置、不覆寫 `config.json`。
+- GUI 序列埠改為掃描後以下拉選單選取，WebUI 帳號固定為 `admin`；LAN discovery 改用 ARP 候選逐一探測並排除 link-local 網段，降低 Pico WebUI 被掃描壓垮的風險。
+- 完整同步加入 Pico 重啟後的啟動寬限期與短 timeout 網路重試，適配實機 Wi-Fi／WebUI 初始化時間。
+- PyInstaller 桌面工具改名為 `PicoPaperClockTool`，並保留 Python/CLI 入口。
+
+### Fixed
+
+- 修正 Pico WebUI 登入回應中 `Set-Cookie` header 變數覆蓋 JSON body，導致圖片工具收到 cookie 字串而無法建立 session 的問題。
+
 ## [2.2.0] - 2026-07-17
 
 本版本聚焦於圖片工作流程、Pico W 記憶體穩定性、儲存空間使用量與 WebUI 使用體驗。

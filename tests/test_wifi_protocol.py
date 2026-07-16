@@ -225,6 +225,7 @@ class WifiProtocolTests(unittest.TestCase):
                 ("Set-Cookie: {}=".format(self.module.SESSION_COOKIE_NAME)).encode(),
                 bytes(response.sent),
             )
+            self.assertIn(b'"authenticated": true', bytes(response.sent))
             self.assertEqual(self.module._admin_username(), "admin")
             token = self.module._CURRENT_SESSION_TOKEN
             csrf = self.module._SESSION_CSRF_TOKEN

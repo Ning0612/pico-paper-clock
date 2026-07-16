@@ -77,6 +77,7 @@ py -3 -m venv .venv
 - AP 頁面可新增、編輯、刪除與切換設定檔；完整欄位、範圍、遷移與重置說明請見 [`docs/CONFIG_GUIDE.md`](docs/CONFIG_GUIDE.md)。
 - 自訂圖片的資料夾、尺寸、事件命名與 GUI/CLI 用法請見 [`docs/IMAGE_GUIDE.md`](docs/IMAGE_GUIDE.md)。
 - 圖片 HTTP API、認證要求與 `MONO_HLSB` 格式請見 [`docs/IMAGE_API.md`](docs/IMAGE_API.md)。
+- Windows 使用者可下載 Release 的 `PicoPaperClockTool` EXE；序列部署時在 GUI 選擇含有 `src/` 的 repository/source zip，掃描序列埠後用選單選擇 Pico，部署前可在 Tree 檢視 manifest；LAN/AP 掃描結果也可選取，圖片批次上傳則可直接選取本機圖片。WebUI 帳號固定為 `admin`。
 
 完全重置會刪除所有設定檔，必須在 AP 頁面的危險區域輸入 `RESET` 確認；這項操作無法復原。
 
@@ -88,6 +89,14 @@ py -3 -m venv .venv
 ```
 
 GitHub Actions 會在 `main` push、pull request 與手動觸發時，以 Python 3.11/3.12 執行依賴安裝、HTML 生成物檢查、`compileall` 與 unittest。HTML 原始碼在 `tools/html_src/`，生成的 `src/html/*.bin` 不應手動編輯。專案資料流、記憶體限制與資料夾地圖請見 [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md)，所有文件入口在 [`docs/README.md`](docs/README.md)。
+
+桌面工具可由 source tree 建置：
+
+```powershell
+.\tools\build_pico_deploy_tool.ps1
+```
+
+輸出為 `dist\PicoPaperClockTool.exe`；舊的 `build_image_tool.ps1` 仍可使用。建置與下載方式、序列部署安全選項及圖片批次流程請見 [`docs/IMAGE_GUIDE.md`](docs/IMAGE_GUIDE.md)。
 
 ## 授權與第三方資產
 

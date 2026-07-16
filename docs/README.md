@@ -16,7 +16,7 @@
 
 - Web UI 原始碼位於 `tools/html_src/`。
 - 執行 `tools/build_html.py` 生成 `src/html/*.bin`；不要直接編輯生成物。
-- 桌面圖片工具核心位於 `tools/pico_image_tool/`，入口為 `tools/pico_image_cli.py` 與 `tools/pico_image_gui.py`。
+- 圖片轉檔與 WebUI client 位於 `tools/pico_image_tool/`；Pico USB 部署核心與整合 GUI 位於 `tools/pico_deploy/`，入口為 `tools/pico_image_cli.py` 與 `tools/pico_image_gui.py`。
 
 ## 維護原則
 
