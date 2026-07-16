@@ -45,6 +45,8 @@ class DashboardUiTests(unittest.TestCase):
         self.assertIn("/api/desk/sessions", self.asset)
         self.assertIn("drawHeatmap(da,now,st)", self.asset)
         self.assertIn('id="yearHeatmap"', self.asset)
+        self.assertIn('id="heatmapRecent"', self.asset)
+        self.assertIn('id="heatmapYears"', self.asset)
 
     def test_dashboard_heatmap_uses_existing_daily_data_and_theme_tokens(self):
         for token in (
@@ -62,6 +64,27 @@ class DashboardUiTests(unittest.TestCase):
         ):
             self.assertIn(token, self.source)
         self.assertIn("map[todayKey]={sec:Math.max(0,Number(st&&st.today_seconds)||0),hasData:true}", self.source)
+
+    def test_dashboard_heatmap_supports_recent_default_and_calendar_year_buttons(self):
+        for token in (
+            'id="heatmapRecent"',
+            'id="heatmapYears"',
+            "heatmapYear=null",
+            "function availableHeatmapYears(data,st)",
+            "function syncHeatmapControls(data,st)",
+            "function selectHeatmapYear(year)",
+            "function renderHeatmap(da,now,st)",
+            "heatmapYear===null",
+            "start=dateFromKey(selectedYear+'0101')",
+            "end=dateFromKey(selectedYear+'1231')",
+            "dayCount=new Date(Number(selectedYear),1,29,12).getMonth()===1?366:365",
+            "for(var offset=0;offset<dayCount;offset++)",
+            "label=selectedYear+' 年'",
+        ):
+            self.assertIn(token, self.source)
+        self.assertIn("renderHeatmap(da,now,st)", self.source)
+        self.assertIn("data-heatmap-year=", self.source)
+        self.assertIn("aria-pressed", self.source)
 
     def test_dashboard_fixes_percentage_metric_alignment_and_canvas_layout(self):
         self.assertIn("Math.min(86400,Number(s)||0))*100/86400", self.source)
