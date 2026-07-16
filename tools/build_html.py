@@ -39,6 +39,7 @@ import sys
 
 SRC_DIR = os.path.join(os.path.dirname(__file__), "html_src")
 BIN_DIR = os.path.join(os.path.dirname(__file__), "..", "src", "html")
+GZIP_OS_UNKNOWN = 255
 
 
 def minify(text: str) -> str:
@@ -63,12 +64,25 @@ def minify(text: str) -> str:
     return "".join(lines)
 
 
+def deterministic_gzip(data: bytes) -> bytes:
+    """Return a gzip payload whose header is stable across build platforms."""
+    output = bytearray(gzip.compress(data, compresslevel=9, mtime=0))
+    if len(output) < 10 or output[:3] != b"\x1f\x8b\x08":
+        raise ValueError("gzip.compress returned an invalid gzip header")
+
+    # Python may delegate mtime=0 compression to zlib, which writes the host
+    # operating-system code into the gzip header.  Keep generated .bin files
+    # identical on Windows and Linux by using the standard unknown code.
+    output[9] = GZIP_OS_UNKNOWN
+    return bytes(output)
+
+
 def build_one(src_path: str, bin_path: str) -> int:
     """建置單一 HTML 源碼為 .bin，回傳輸出位元組數。"""
     with open(src_path, "r", encoding="utf-8") as f:
         source = f.read()
 
-    output = gzip.compress(minify(source).encode("utf-8"), compresslevel=9, mtime=0)
+    output = deterministic_gzip(minify(source).encode("utf-8"))
 
     os.makedirs(os.path.dirname(bin_path), exist_ok=True)
     with open(bin_path, "wb") as f:
