@@ -111,11 +111,7 @@ class AppController:
         # If ambient light is below threshold (screen should be off) or time since last touch is less than 1 hour
         if adc_value <= light_threshold or time_since_touch < 3600:         
             # If date has changed
-            if t[2] != self.state.last_day:
-                self.state.last_day = t[2]
-                self.state.weather_forecast = None
-                self.state.current_weather = None
-                sync_time()
+            self._handle_date_change(t[2])
 
             # If minute has changed, or touch occurred, or first run
             if t[4] != self.state.last_minute or touch_state is not None or self.state.is_first_run:
@@ -138,6 +134,21 @@ class AppController:
                 if not self._startup_discord_pending():
                     self.presence.flush_discord()
         gc.collect()
+
+    def _handle_date_change(self, current_day):
+        """Invalidate daily weather data and permit an immediate refresh."""
+        if current_day == self.state.last_day:
+            return False
+
+        self.state.last_day = current_day
+        self.state.weather_forecast = None
+        self.state.current_weather = None
+        self.state.weather_forecast_last_updated = -1
+        self.state.weather_forecast_last_attempted = -1
+        self.state.current_weather_last_updated = -1
+        self.state.current_weather_last_attempted = -1
+        sync_time()
+        return True
 
     def _send_startup_discord_if_ready(self):
         if self.startup_discord_sent or self.startup_discord_disabled or not self.lan_ip:
