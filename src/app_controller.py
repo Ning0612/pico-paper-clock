@@ -276,7 +276,7 @@ class AppController:
             if forecast_due:
                 used_network = True
                 self.state.weather_forecast_last_attempted = now_ms
-                weather_forecast = fetch_weather_forecast(self.api_key, self.location, days_limit=4, timezone_offset=self.time_zone_offset)
+                weather_forecast = fetch_weather_forecast(self.api_key, self.location, days_limit=5, timezone_offset=self.time_zone_offset)
                 if weather_forecast:
                     self.state.weather_forecast = weather_forecast
                     self.state.weather_forecast_last_updated = time.ticks_ms()

@@ -19,10 +19,8 @@ def update_page_weather(current_weather, weather_forecast, display_image_path, p
         time_str = "{:02d}:{:02d}".format(t[3], t[4])
         today_date = "{:02d}-{:02d}".format(t[1], t[2])
         forecast_start = 0
-        current_rain_prob = -1
         if weather_forecast and weather_forecast[0][0] == today_date:
             forecast_start = 1
-            current_rain_prob = weather_forecast[0][3]
             
         draw_scaled_text(canvas, date_str, 3, 10, 3, 0)
         draw_scaled_text(canvas, time_str, 3, 40, 3, 0)
@@ -38,23 +36,11 @@ def update_page_weather(current_weather, weather_forecast, display_image_path, p
         if dht22_humidity is not None:
             draw_scaled_text(canvas, "{}%".format(int(dht22_humidity)), 133, 53, 1, 0)
             
-        # Display forecast area: first slot = current OpenWeather, next 3 = future forecast
+        # Display four future forecast slots; current weather is shown above.
         if weather_forecast:
             offset = 0
-            
-            # First slot: OpenWeather current weather
-            if current_weather and current_weather[1] != "Unknown":
-                weather_icon_path = "/image/weather_icons/{}.bin".format(current_weather[1])
-                draw_image(canvas, weather_icon_path, 32, 32, 8 + offset, 80)
-                draw_scaled_text(canvas, "{:02d}".format(int(current_weather[0])), 15 + offset, 72, 1, 0)
-                draw_scaled_text(canvas, "o", 30 + offset, 67, 1, 0)
-                # Show current rain probability if available
-                if current_rain_prob >= 0:
-                    draw_scaled_text(canvas, "{}%".format(int(current_rain_prob)), 15 + offset, 115, 1, 0)
-                offset += 40
-            
-            # Next 3 slots: Future 3-day forecast (skip first day, show next 3)
-            for i in range(forecast_start, min(len(weather_forecast), forecast_start + 3)):
+
+            for i in range(forecast_start, min(len(weather_forecast), forecast_start + 4)):
                 weather = weather_forecast[i]
                 icon_path = "/image/weather_icons/{}.bin".format(weather[2])
                 draw_image(canvas, icon_path, 32, 32, 8 + offset, 80)

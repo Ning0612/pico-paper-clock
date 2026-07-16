@@ -6,7 +6,7 @@ import gc
 import ujson
 
 OPENWEATHER_BASE_URL = "http://api.openweathermap.org/data/2.5"
-FORECAST_COUNTS = (24, 20, 16, 12, 8)
+FORECAST_COUNTS = (40, 32, 28, 24, 20, 16, 12, 8)
 FORECAST_READ_BUFFER_SIZE = 256
 MAX_FORECAST_ENTRY_BYTES = 2048
 
@@ -262,14 +262,14 @@ def fetch_current_weather(api_key, location):
 
     return None
 
-def fetch_weather_forecast(api_key, location, days_limit=4, timezone_offset=8):
+def fetch_weather_forecast(api_key, location, days_limit=5, timezone_offset=8):
     """Fetches weather forecast information. """
     if not network.WLAN(network.STA_IF).isconnected():
         print("Info: No internet connection. Skipping weather forecast request.")
         return []
 
     print(f"Info: Fetching weather forecast for {location}.")
-    max_count = min(24, max(8, days_limit * 6))
+    max_count = min(40, max(8, days_limit * 8))
 
     for forecast_count in FORECAST_COUNTS:
         if forecast_count > max_count:
@@ -291,6 +291,11 @@ def fetch_weather_forecast(api_key, location, days_limit=4, timezone_offset=8):
             result = _aggregate_forecast_stream(response, days_limit, timezone_offset)
             gc.collect()
             _log_heap("after forecast parse")
+            if len(result) < days_limit:
+                print("Warning: Forecast returned only {} of {} requested days with cnt={}.".format(
+                    len(result), days_limit, forecast_count
+                ))
+                continue
             return result
 
         except (ValueError, AttributeError) as e:

@@ -2,6 +2,7 @@ import importlib.util
 import io
 import json
 import sys
+import time
 import types
 import unittest
 from pathlib import Path
@@ -85,6 +86,58 @@ class WeatherStreamTests(unittest.TestCase):
             with self.subTest(result=result):
                 with self.assertRaises(OSError):
                     list(self.module._iter_raw_bytes(BadStream(result)))
+
+    def test_forecast_aggregation_supports_today_plus_four_future_days(self):
+        base = int(time.mktime((2026, 7, 17, 0, 0, 0, 0, 0, -1)))
+        payload = json.dumps({
+            "list": [
+                {
+                    "dt": base + index * 86400,
+                    "main": {"temp": 20 + index},
+                    "weather": [{"main": "Clear"}],
+                }
+                for index in range(5)
+            ]
+        }).encode()
+        response = types.SimpleNamespace(raw=io.BytesIO(payload))
+
+        result = self.module._aggregate_forecast_stream(response, 5, 0)
+
+        self.assertEqual(len(result), 5)
+        self.assertEqual(
+            [item[0] for item in result],
+            ["07-17", "07-18", "07-19", "07-20", "07-21"],
+        )
+
+    def test_forecast_retries_when_response_has_too_few_days(self):
+        class Response:
+            status_code = 200
+
+            def close(self):
+                pass
+
+        original_request = self.module._make_request_with_retry
+        original_aggregate = self.module._aggregate_forecast_stream
+        requested_urls = []
+        aggregate_calls = []
+        try:
+            self.module._make_request_with_retry = lambda url: requested_urls.append(url) or Response()
+
+            def aggregate(_response, _days_limit, _timezone_offset):
+                aggregate_calls.append(True)
+                return list(range(4 if len(aggregate_calls) == 1 else 5))
+
+            self.module._aggregate_forecast_stream = aggregate
+
+            result = self.module.fetch_weather_forecast("key", "Zhunan", days_limit=5, timezone_offset=8)
+
+            self.assertEqual(result, [0, 1, 2, 3, 4])
+            self.assertEqual(len(aggregate_calls), 2)
+            self.assertIn("cnt=40", requested_urls[0])
+            self.assertIn("cnt=32", requested_urls[1])
+        finally:
+            self.module._make_request_with_retry = original_request
+            self.module._aggregate_forecast_stream = original_aggregate
 
 
 if __name__ == "__main__":

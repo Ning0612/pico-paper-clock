@@ -150,14 +150,14 @@ class AppControllerDateChangeTests(unittest.TestCase):
             time.ticks_ms = lambda: 100000
             time.ticks_diff = lambda new, old: new - old
             self.module.fetch_current_weather = lambda *_args: calls.append("current") or (30, "Clouds")
-            self.module.fetch_weather_forecast = lambda *_args, **_kwargs: calls.append("forecast") or [
-                ("07-17", 29, "Clouds", 20)
-            ]
+            self.module.fetch_weather_forecast = lambda *_args, **kwargs: calls.append(
+                ("forecast", kwargs["days_limit"])
+            ) or [("07-17", 29, "Clouds", 20)]
 
             controller._handle_date_change(17)
 
             self.assertTrue(controller._update_weather())
-            self.assertEqual(calls, ["current", "forecast"])
+            self.assertEqual(calls, ["current", ("forecast", 5)])
         finally:
             self.module.fetch_current_weather = original_current
             self.module.fetch_weather_forecast = original_forecast
