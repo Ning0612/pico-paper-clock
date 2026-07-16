@@ -82,9 +82,9 @@ main.py
 ```powershell
 .\.venv\Scripts\python.exe tools\build_html.py
 .\.venv\Scripts\python.exe -m unittest discover -s tests -v
-.\.venv\Scripts\python.exe upload.py --port COM6 --no-clean
+.\.venv\Scripts\python.exe tools\pico_deploy\upload_cli.py --port COM6 --no-clean
 ```
 
 本次記憶體路徑的最低驗證包括 host tests、`compileall`、`git diff --check`，以及 Pico W serial 中的 `Success: Discord LAN IP notification sent.`、DHT22 讀值與天氣請求成功。完整 peak heap 仍應以實際硬體長跑資料為準。
 
-Pico 部署工具 EXE 由 `tools/build_pico_deploy_tool.ps1` 建置，`tools/build_image_tool.ps1` 保留為相容別名。若使用遞迴清理，部署前要先保存裝置上只有 runtime 的圖片。
+Pico 部署工具 EXE 由 `tools/build_pico_deploy_tool.ps1` 建置。若使用遞迴清理，部署前要先保存裝置上只有 runtime 的圖片。

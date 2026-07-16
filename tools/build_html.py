@@ -6,7 +6,7 @@ tools/build_html.py  —  HTML source → src/html/*.bin 建置工具
 --------
   1. 在 tools/html_src/*.html 編輯人類可讀的 HTML 原始碼
   2. python tools/build_html.py            # 建置所有 .bin
-  3. python upload.py                      # 部署到裝置
+  3. python tools/pico_deploy/upload_cli.py # 部署到裝置
 
 初始化（首次使用）
 ------------------

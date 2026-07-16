@@ -6,7 +6,7 @@
 
 - [架構與資料夾地圖](ARCHITECTURE.md) — 裝置資料流、記憶體邊界、圖片格式相容策略與維護規則。
 - [硬體與接線](HARDWARE.md) — 元件、Pin map、感測器與蜂鳴器接線。
-- [安裝、部署與 AP 設定](SETUP_GUIDE.md) — 主機環境、MicroPython、`upload.py`、AP Web UI 與驗證。
+- [安裝、部署與 AP 設定](SETUP_GUIDE.md) — 主機環境、MicroPython、`tools/pico_deploy/upload_cli.py`、AP Web UI 與驗證。
 - [設定指南](CONFIG_GUIDE.md) — schema v3、多設定檔、範圍與交易式保存。
 - [圖片資產與轉換](IMAGE_GUIDE.md) — 資產目錄、尺寸、事件命名與 GUI/CLI。
 - [圖片 API](IMAGE_API.md) — 裝置圖片列表、上傳、預覽、刪除與認證契約。

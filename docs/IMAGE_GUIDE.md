@@ -21,8 +21,6 @@
 GUI 入口：
 
 ```powershell
-.\.venv\Scripts\python.exe tools\image_to_bin.py
-# 或
 .\.venv\Scripts\python.exe tools\pico_image_cli.py gui
 ```
 
@@ -40,7 +38,7 @@ Windows EXE 建置：
 .\tools\build_pico_deploy_tool.ps1
 ```
 
-輸出 `dist\PicoPaperClockTool.exe`。也可直接使用 Python/CLI，不需要 PyInstaller；`build_image_tool.ps1` 保留作為舊建置命令名稱。
+輸出 `dist\PicoPaperClockTool.exe`。也可直接使用 Python/CLI，不需要 PyInstaller。
 
 CLI 範例：
 
@@ -58,6 +56,6 @@ CLI 範例：
 raw payload 的 canonical `MONO_HLSB` 是每個 packed byte 的 bit 0 代表最左側像素。PPC1 header 會自行保存 bit order，裝置以 256-byte history、512-byte input buffer 與 row buffer 逐列解壓，不會配置整張圖片。
 
 - raw 圖片會使用 `.hlsb` sidecar 標記 HLSB；沒有 marker 的既有 raw 資產仍按舊版 MSB-left 解碼。
-- PPC1 檔案仍使用 `.bin` 副檔名，不需要 sidecar；`upload.py` 會直接部署 payload。
+- PPC1 檔案仍使用 `.bin` 副檔名，不需要 sidecar；`tools/pico_deploy/upload_cli.py` 會直接部署 payload。
 
 圖片 API 目前支援 custom、login、events 三個 collection，尺寸與 byte length 請見 [`IMAGE_API.md`](IMAGE_API.md)。

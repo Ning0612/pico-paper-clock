@@ -32,10 +32,10 @@ if (!(Test-Path src\config.json)) { Copy-Item src\config.json.example src\config
 
 ## 上傳韌體檔案
 
-`upload.py` 需要 `mpremote`，會上傳 `src/` 中的 Python/JSON、圖片與目錄，完成後重啟裝置並開啟互動式 REPL：
+`tools/pico_deploy/upload_cli.py` 需要 `mpremote`，會上傳 `src/` 中的 Python/JSON、圖片與目錄，完成後重啟裝置並開啟互動式 REPL；根目錄 `upload.py` 仍可作為相容 wrapper：
 
 ```powershell
-.\.venv\Scripts\python.exe upload.py --port COM7 --no-clean
+.\.venv\Scripts\python.exe tools\pico_deploy\upload_cli.py --port COM7 --no-clean
 ```
 
 常用參數：

@@ -1,4 +1,4 @@
-"""Serial deployment primitives shared by the desktop GUI and upload.py."""
+"""Serial deployment primitives shared by the desktop GUI and upload CLI."""
 
 from __future__ import annotations
 

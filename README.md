@@ -58,12 +58,14 @@ py -3 -m venv .venv
 3. 執行部署（將 `COM7` 換成實際序列埠）：
 
    ```powershell
-   .\.venv\Scripts\python.exe upload.py --port COM7 --no-clean
+   .\.venv\Scripts\python.exe tools\pico_deploy\upload_cli.py --port COM7 --no-clean
    ```
 
 4. 啟動後若無法連上已知 Wi-Fi，裝置會建立 AP；連線至螢幕顯示的 SSID，再開啟 `http://192.168.4.1` 完成設定。
 
-`upload.py` 會在完成後重啟裝置並進入 REPL；按 `Ctrl+X` 離開。`--recursive-clean` 會刪除裝置上只存在於 runtime 的檔案與圖片，使用前請先備份。
+`tools\pico_deploy\upload_cli.py` 會在完成後重啟裝置並進入 REPL；按 `Ctrl+X` 離開。`--recursive-clean` 會刪除裝置上只存在於 runtime 的檔案與圖片，使用前請先備份。
+
+`tools\pico_deploy\upload_cli.py` 是無 GUI 的 headless USB 部署入口；根目錄 `upload.py` 只保留作為相容 wrapper，一般 Windows 使用者可改用 Release 的 `PicoPaperClockTool` GUI。
 
 ## 硬體
 
@@ -96,7 +98,7 @@ GitHub Actions 會在 `main` push、pull request 與手動觸發時，以 Python
 .\tools\build_pico_deploy_tool.ps1
 ```
 
-輸出為 `dist\PicoPaperClockTool.exe`；舊的 `build_image_tool.ps1` 仍可使用。建置與下載方式、序列部署安全選項及圖片批次流程請見 [`docs/IMAGE_GUIDE.md`](docs/IMAGE_GUIDE.md)。
+輸出為 `dist\PicoPaperClockTool.exe`。建置與下載方式、序列部署安全選項及圖片批次流程請見 [`docs/IMAGE_GUIDE.md`](docs/IMAGE_GUIDE.md)。
 
 ## 授權與第三方資產
 
