@@ -10,7 +10,7 @@
 | `pico-paper-clock-v3-case.stl` | 3D 外殼 v3 列印／切片網格 | `4F5417BE263C1B98F8B7706EE529E4FB1154C11D15F5A0BFEFF1943EA877FC01` |
 | `pico-paper-clock-tool-v2.3.0-windows-x64.exe` | Pico 部署工具 Windows x64 GUI | `A4706A0CE383AB3B8F6D2E6920B04E402BC27E4EE931ED709E0201108B921C1B` |
 
-使用者可從 [v2.1.1 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.1.1) 下載這些 release assets；UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
+UF2 與三個 CAD 檔目前掛在 [v2.1.1 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.1.1)；桌面部署工具 EXE 隨對應版本發布，目前掛在 [v2.3.0 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.3.0)。UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
 
 ## CAD 格式建議
 
@@ -30,8 +30,8 @@ v2.3.0 起可附加 Windows x64 桌面工具：
 ## 發布檢查表
 
 1. 建立版本 tag 與 GitHub Release。
-2. 將 `dist/release-assets/` 中的四個檔案附加到該 Release。
-3. 發布後確認 UF2、`.step`、`.stl` 與 `.SLDPRT` 連結可下載。
-4. 若更換韌體版本或 CAD 檔，更新本文件、README 與 CHANGELOG 的檔名。
+2. 將 `dist/release-assets/` 中該次發布涉及的檔案附加到該 Release（韌體/CAD 變更時附 UF2 與三個 CAD 檔；桌面工具變更時附對應版本的 EXE）。
+3. 發布後確認附加的檔案連結可下載。
+4. 若更換韌體版本、CAD 檔或桌面工具版本，更新本文件（含檔名、SHA-256 與對應 Release tag 連結）、README 與 CHANGELOG。
 
 `dist/` 已被 `.gitignore` 忽略；請勿將這些檔案重新放回 `firmware/` 或 `hardware/` 後提交。
