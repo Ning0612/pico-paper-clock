@@ -15,6 +15,7 @@ DISCORD_FLUSH_INTERVAL_MS = 60 * 1000
 MAX_EVENT_LINES_IN_MEMORY = 128
 MAX_DAILY_LINES_IN_MEMORY = 366
 MAX_PRESENCE_LINE_CHARS = 256
+DEFAULT_PRESENCE_TIMEOUT_MIN = 3
 
 _presence_manager = None
 
@@ -222,7 +223,7 @@ class PresenceManager:
         "last_adc", "last_threshold", "last_update_epoch", "today_seconds",
         "today_transitions", "today_longest_session_seconds", "today_session_count",
         "pending_summary", "pending_session", "flush_summary_first", "last_retry_ms",
-        "discord_disabled",
+        "discord_disabled", "away_since_epoch",
     )
 
     def __init__(self, discord_sender=None, session_sender=None):
@@ -248,11 +249,13 @@ class PresenceManager:
         self.flush_summary_first = False
         self.last_retry_ms = time.ticks_add(time.ticks_ms(), -600001)
         self.discord_disabled = False
+        self.away_since_epoch = None
 
-    def update(self, adc_value, threshold, local_time):
+    def update(self, adc_value, threshold, local_time, presence_timeout_min=DEFAULT_PRESENCE_TIMEOUT_MIN):
         date = _date_key(local_time)
         now_epoch = _epoch(local_time)
         at_desk = adc_value <= threshold
+        timeout_seconds = self._presence_timeout_seconds(presence_timeout_min)
 
         self.last_adc = adc_value
         self.last_threshold = threshold
@@ -265,29 +268,63 @@ class PresenceManager:
         if date != self.current_date:
             self._rollover_day(date, local_time, now_epoch)
 
-        if at_desk != self.current_state:
-            session_summary = None
-            if self.current_state:
-                segment_seconds = max(0, int(now_epoch - self.last_change_epoch))
-                self.today_seconds += segment_seconds
-                self._record_session_duration(segment_seconds)
-                session_summary = (
-                    self.session_start_date or self.last_change_date,
-                    self.session_start_time or self.last_change_time,
-                    date,
-                    _time_key(local_time),
-                    self._session_duration(now_epoch, segment_seconds)
-                )
-            elif at_desk:
-                self.today_session_count += 1
-                self._set_session_start(date, _time_key(local_time), now_epoch)
-            self.current_state = at_desk
-            self.last_change_epoch = now_epoch
-            self.today_transitions += 1
-            transition_saved = self._record_transition(local_time, at_desk, adc_value)
-            if session_summary and transition_saved:
-                self._queue_session(session_summary)
-                self._clear_session_start()
+        self._apply_sensor_state(
+            at_desk, local_time, now_epoch, adc_value, timeout_seconds
+        )
+
+    def _presence_timeout_seconds(self, presence_timeout_min):
+        try:
+            minutes = int(presence_timeout_min)
+        except (TypeError, ValueError):
+            minutes = DEFAULT_PRESENCE_TIMEOUT_MIN
+        return max(1, minutes) * 60
+
+    def _apply_sensor_state(self, at_desk, local_time, now_epoch, adc_value, timeout_seconds):
+        if self.current_state:
+            if at_desk:
+                self.away_since_epoch = None
+                return
+            if self.away_since_epoch is None:
+                self.away_since_epoch = now_epoch
+                return
+            try:
+                away_seconds = max(0, int(now_epoch - self.away_since_epoch))
+            except Exception:
+                away_seconds = 0
+            if away_seconds < timeout_seconds:
+                return
+            self.away_since_epoch = None
+            self._transition(local_time, now_epoch, False, adc_value)
+            return
+
+        self.away_since_epoch = None
+        if at_desk:
+            self._transition(local_time, now_epoch, True, adc_value)
+
+    def _transition(self, local_time, now_epoch, at_desk, adc_value):
+        session_summary = None
+        date = _date_key(local_time)
+        if self.current_state:
+            segment_seconds = max(0, int(now_epoch - self.last_change_epoch))
+            self.today_seconds += segment_seconds
+            self._record_session_duration(segment_seconds)
+            session_summary = (
+                self.session_start_date or self.last_change_date,
+                self.session_start_time or self.last_change_time,
+                date,
+                _time_key(local_time),
+                self._session_duration(now_epoch, segment_seconds)
+            )
+        elif at_desk:
+            self.today_session_count += 1
+            self._set_session_start(date, _time_key(local_time), now_epoch)
+        self.current_state = at_desk
+        self.last_change_epoch = now_epoch
+        self.today_transitions += 1
+        transition_saved = self._record_transition(local_time, at_desk, adc_value)
+        if session_summary and transition_saved:
+            self._queue_session(session_summary)
+            self._clear_session_start()
 
     def get_status(self):
         session_seconds = 0
@@ -329,6 +366,7 @@ class PresenceManager:
     def _start_day(self, date, local_time, now_epoch, at_desk):
         self.current_date = date
         self.current_state = at_desk
+        self.away_since_epoch = None
         self.last_change_epoch = now_epoch
         self.last_change_date = date
         self.last_change_time = _time_key(local_time)
@@ -420,28 +458,10 @@ class PresenceManager:
             restored_open_session = True
 
         if at_desk != self.current_state:
-            session_summary = None
-            if self.current_state:
-                segment_seconds = max(0, int(now_epoch - self.last_change_epoch))
-                self.today_seconds += segment_seconds
-                self._record_session_duration(segment_seconds)
-                session_summary = (
-                    self.session_start_date or self.last_change_date,
-                    self.session_start_time or self.last_change_time,
-                    date,
-                    _time_key(local_time),
-                    self._session_duration(now_epoch, segment_seconds)
-                )
-            elif at_desk:
-                self.today_session_count += 1
-                self._set_session_start(date, _time_key(local_time), now_epoch)
-            self.current_state = at_desk
-            self.last_change_epoch = now_epoch
-            self.today_transitions += 1
-            transition_saved = self._record_transition(local_time, at_desk, adc_value)
-            if session_summary and transition_saved:
-                self._queue_session(session_summary)
-                self._clear_session_start()
+            if self.current_state and not at_desk:
+                self.away_since_epoch = now_epoch
+            else:
+                self._transition(local_time, now_epoch, at_desk, adc_value)
         elif last_state is None and not restored_open_session:
             self._record_transition(local_time, at_desk, adc_value)
 

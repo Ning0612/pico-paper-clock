@@ -79,6 +79,7 @@ class ConfigManager:
                     "user": {
                         "birthday": "0101",
                         "light_threshold": 56000,
+                        "presence_timeout_min": 3,
                         "image_interval_min": 2,
                         "timezone_offset": 8
                     },
@@ -127,6 +128,7 @@ class ConfigManager:
                         "user": {
                             "birthday": legacy.get("user", {}).get("birthday", "0101"),
                             "light_threshold": legacy.get("user", {}).get("light_threshold", 56000),
+                            "presence_timeout_min": legacy.get("user", {}).get("presence_timeout_min", 3),
                             "image_interval_min": legacy.get("user", {}).get("image_interval_min", 2),
                             "timezone_offset": legacy.get("user", {}).get("timezone_offset", 8)
                         },
@@ -195,6 +197,7 @@ class ConfigManager:
             user = profile["user"]
             normalized = {
                 "light_threshold": self._clamp_int(user.get("light_threshold"), 0, 65535, 56000),
+                "presence_timeout_min": self._clamp_int(user.get("presence_timeout_min"), 1, 60, 3),
                 "image_interval_min": self._clamp_int(user.get("image_interval_min"), 1, 60, 2),
                 "timezone_offset": self._clamp_int(user.get("timezone_offset"), -12, 14, 8),
             }

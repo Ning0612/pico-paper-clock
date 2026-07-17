@@ -1071,6 +1071,7 @@ def _save_settings_from_params(params):
         "user": {
             "birthday": birthday_value,
             "light_threshold": bounded_int("light_threshold", 56000, 0, 65535),
+            "presence_timeout_min": bounded_int("presence_timeout_min", 3, 1, 60),
             "image_interval_min": bounded_int("image_interval_min", 2, 1, 60),
             "timezone_offset": bounded_int("timezone_offset", 8, -12, 14)
         },
@@ -1275,11 +1276,13 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
             "user": dict(base_profile.get("user", {
                 "birthday": "0101",
                 "light_threshold": 56000,
+                "presence_timeout_min": 3,
                 "image_interval_min": 2,
                 "timezone_offset": 8
             })) if base_profile else {
                 "birthday": "0101",
                 "light_threshold": 56000,
+                "presence_timeout_min": 3,
                 "image_interval_min": 2,
                 "timezone_offset": 8
             },

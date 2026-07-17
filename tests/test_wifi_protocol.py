@@ -92,12 +92,24 @@ class WifiProtocolTests(unittest.TestCase):
                 "lan_admin.password": "",
                 "setup_complete": False,
             }
+            profile = {
+                "name": "Home",
+                "wifi": {"ssid": "", "password": ""},
+            }
+            last_profile_update = None
 
             def get_global(self, path, default=None):
                 return self.values.get(path, default)
 
             def set_global(self, path, value):
                 self.values[path] = value
+
+            def get_profile(self, name):
+                return self.profile if name == self.profile["name"] else None
+
+            def apply_profile_update(self, original_name, profile_data, **_kwargs):
+                self.last_profile_update = (original_name, profile_data)
+                self.profile = profile_data
 
         config = types.ModuleType("config_manager")
         config.config_manager = Config()
@@ -128,6 +140,7 @@ class WifiProtocolTests(unittest.TestCase):
         images.image_store = types.SimpleNamespace(catalog_generation=0)
         images.image_directory = lambda *_args: None
         images.image_store.iter_images = lambda *_args: iter(())
+        images.validate_event = lambda _value: None
         sys.modules["image_manager"] = images
 
         source = Path(__file__).resolve().parents[1] / "src" / "wifi_manager.py"
@@ -346,6 +359,38 @@ class WifiProtocolTests(unittest.TestCase):
             self.module.get_presence_manager = original_manager
             self.module.iter_lines = original_iter_lines
             self.module._presence_epoch = original_presence_epoch
+
+    def test_config_save_preserves_presence_timeout(self):
+        self.config.last_profile_update = None
+        params = {
+            "original_profile_name": "Home",
+            "profile_name": "Home",
+            "ssid": "",
+            "password": "",
+            "location": "Taipei",
+            "birthday": "0101",
+            "light_threshold": "20000",
+            "presence_timeout_min": "7",
+            "image_interval_min": "2",
+            "timezone_offset": "8",
+            "chime_interval": "hourly",
+            "chime_pitch": "880",
+            "chime_volume": "80",
+        }
+        self.module._save_settings_from_params(params)
+
+        self.assertIsNotNone(self.config.last_profile_update)
+        self.assertEqual(
+            self.config.last_profile_update[1]["user"]["presence_timeout_min"],
+            7,
+        )
+
+        params["presence_timeout_min"] = "0"
+        with self.assertRaises(ValueError):
+            self.module._save_settings_from_params(params)
+        params["presence_timeout_min"] = "61"
+        with self.assertRaises(ValueError):
+            self.module._save_settings_from_params(params)
 
 
 if __name__ == "__main__":

@@ -24,6 +24,7 @@
       "user": {
         "birthday": "0101",
         "light_threshold": 40000,
+        "presence_timeout_min": 3,
         "image_interval_min": 2,
         "timezone_offset": 8
       },
@@ -44,6 +45,7 @@
       "user": {
         "birthday": "0101",
         "light_threshold": 50000,
+        "presence_timeout_min": 3,
         "image_interval_min": 5,
         "timezone_offset": 8
       },
@@ -64,6 +66,7 @@
       "user": {
         "birthday": "0101",
         "light_threshold": 30000,
+        "presence_timeout_min": 3,
         "image_interval_min": 3,
         "timezone_offset": 8
       },
