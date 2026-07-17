@@ -15,7 +15,8 @@ DISCORD_FLUSH_INTERVAL_MS = 60 * 1000
 MAX_EVENT_LINES_IN_MEMORY = 128
 MAX_DAILY_LINES_IN_MEMORY = 366
 MAX_PRESENCE_LINE_CHARS = 256
-DEFAULT_PRESENCE_TIMEOUT_MIN = 3
+DEFAULT_PRESENCE_LEAVE_TIMEOUT_SEC = 180
+DEFAULT_PRESENCE_RETURN_TIMEOUT_SEC = 10
 
 _presence_manager = None
 
@@ -223,7 +224,7 @@ class PresenceManager:
         "last_adc", "last_threshold", "last_update_epoch", "today_seconds",
         "today_transitions", "today_longest_session_seconds", "today_session_count",
         "pending_summary", "pending_session", "flush_summary_first", "last_retry_ms",
-        "discord_disabled", "away_since_epoch",
+        "discord_disabled", "away_since_epoch", "return_since_epoch",
     )
 
     def __init__(self, discord_sender=None, session_sender=None):
@@ -250,58 +251,103 @@ class PresenceManager:
         self.last_retry_ms = time.ticks_add(time.ticks_ms(), -600001)
         self.discord_disabled = False
         self.away_since_epoch = None
+        self.return_since_epoch = None
 
-    def update(self, adc_value, threshold, local_time, presence_timeout_min=DEFAULT_PRESENCE_TIMEOUT_MIN):
+    def update(self, adc_value, threshold, local_time,
+               leave_timeout_sec=DEFAULT_PRESENCE_LEAVE_TIMEOUT_SEC,
+               return_timeout_sec=DEFAULT_PRESENCE_RETURN_TIMEOUT_SEC):
         date = _date_key(local_time)
         now_epoch = _epoch(local_time)
         at_desk = adc_value <= threshold
-        timeout_seconds = self._presence_timeout_seconds(presence_timeout_min)
+        leave_timeout_sec = self._normalize_timeout_seconds(
+            leave_timeout_sec, DEFAULT_PRESENCE_LEAVE_TIMEOUT_SEC, 1
+        )
+        return_timeout_sec = self._normalize_timeout_seconds(
+            return_timeout_sec, DEFAULT_PRESENCE_RETURN_TIMEOUT_SEC, 0
+        )
 
         self.last_adc = adc_value
         self.last_threshold = threshold
         self.last_update_epoch = now_epoch
 
         if self.current_date is None:
-            self._restore_day(date, local_time, now_epoch, at_desk, adc_value)
+            self._restore_day(
+                date,
+                local_time,
+                now_epoch,
+                at_desk,
+                adc_value,
+                leave_timeout_sec,
+                return_timeout_sec,
+            )
             return
 
         if date != self.current_date:
             self._rollover_day(date, local_time, now_epoch)
 
         self._apply_sensor_state(
-            at_desk, local_time, now_epoch, adc_value, timeout_seconds
+            at_desk,
+            local_time,
+            now_epoch,
+            adc_value,
+            leave_timeout_sec,
+            return_timeout_sec,
         )
 
-    def _presence_timeout_seconds(self, presence_timeout_min):
+    def _normalize_timeout_seconds(self, value, default, minimum):
         try:
-            minutes = int(presence_timeout_min)
+            seconds = int(value)
         except (TypeError, ValueError):
-            minutes = DEFAULT_PRESENCE_TIMEOUT_MIN
-        return max(1, minutes) * 60
+            seconds = default
+        return max(minimum, seconds)
 
-    def _apply_sensor_state(self, at_desk, local_time, now_epoch, adc_value, timeout_seconds):
+    def _timeout_elapsed(self, now_epoch, since_epoch, timeout_sec):
+        try:
+            return max(0, int(now_epoch - since_epoch)) >= timeout_sec
+        except Exception:
+            return False
+
+    def _apply_sensor_state(
+        self,
+        at_desk,
+        local_time,
+        now_epoch,
+        adc_value,
+        leave_timeout_sec,
+        return_timeout_sec,
+    ):
         if self.current_state:
+            self.return_since_epoch = None
             if at_desk:
                 self.away_since_epoch = None
                 return
             if self.away_since_epoch is None:
                 self.away_since_epoch = now_epoch
                 return
-            try:
-                away_seconds = max(0, int(now_epoch - self.away_since_epoch))
-            except Exception:
-                away_seconds = 0
-            if away_seconds < timeout_seconds:
+            if not self._timeout_elapsed(now_epoch, self.away_since_epoch, leave_timeout_sec):
                 return
             self.away_since_epoch = None
             self._transition(local_time, now_epoch, False, adc_value)
             return
 
         self.away_since_epoch = None
-        if at_desk:
+        if not at_desk:
+            self.return_since_epoch = None
+            return
+        if return_timeout_sec == 0:
             self._transition(local_time, now_epoch, True, adc_value)
+            return
+        if self.return_since_epoch is None:
+            self.return_since_epoch = now_epoch
+            return
+        if not self._timeout_elapsed(now_epoch, self.return_since_epoch, return_timeout_sec):
+            return
+        self.return_since_epoch = None
+        self._transition(local_time, now_epoch, True, adc_value)
 
     def _transition(self, local_time, now_epoch, at_desk, adc_value):
+        self.away_since_epoch = None
+        self.return_since_epoch = None
         session_summary = None
         date = _date_key(local_time)
         if self.current_state:
@@ -367,6 +413,7 @@ class PresenceManager:
         self.current_date = date
         self.current_state = at_desk
         self.away_since_epoch = None
+        self.return_since_epoch = None
         self.last_change_epoch = now_epoch
         self.last_change_date = date
         self.last_change_time = _time_key(local_time)
@@ -379,7 +426,16 @@ class PresenceManager:
         else:
             self._clear_session_start()
 
-    def _restore_day(self, date, local_time, now_epoch, at_desk, adc_value):
+    def _restore_day(
+        self,
+        date,
+        local_time,
+        now_epoch,
+        at_desk,
+        adc_value,
+        leave_timeout_sec,
+        return_timeout_sec,
+    ):
         self._start_day(date, local_time, now_epoch, at_desk)
         total = 0
         transitions = 0
@@ -457,13 +513,17 @@ class PresenceManager:
             self.session_start_time = prior_time
             restored_open_session = True
 
-        if at_desk != self.current_state:
-            if self.current_state and not at_desk:
-                self.away_since_epoch = now_epoch
-            else:
-                self._transition(local_time, now_epoch, at_desk, adc_value)
-        elif last_state is None and not restored_open_session:
+        if last_state is None and not restored_open_session:
             self._record_transition(local_time, at_desk, adc_value)
+        else:
+            self._apply_sensor_state(
+                at_desk,
+                local_time,
+                now_epoch,
+                adc_value,
+                leave_timeout_sec,
+                return_timeout_sec,
+            )
 
     def _event_epoch(self, date, time_value):
         try:

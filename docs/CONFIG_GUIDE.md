@@ -118,7 +118,8 @@ WiFi 連線設定
 |------|------|------|--------|------|
 | `birthday` | String | 生日（MMDD 格式） | `"0101"` | `"0101"` ~ `"1231"` |
 | `light_threshold` | Number | 光感臨界值（ADC 數值） | `56000` | `0` ~ `65535` |
-| `presence_timeout_min` | Number | 光感持續多久才判定離開書桌（分鐘） | `3` | `1` ~ `60` |
+| `presence_leave_timeout_sec` | Number | 光感持續多久才判定離開書桌（秒） | `180` | `60` ~ `3600` |
+| `presence_return_timeout_sec` | Number | 光感持續多久才恢復在席（秒） | `10` | `0` ~ `60` |
 | `image_interval_min` | Number | 圖片輪播間隔（分鐘） | `2` | `1` ~ `60` |
 | `timezone_offset` | Number | 時區偏移（小時） | `8` | `-12` ~ `14` |
 
@@ -129,8 +130,9 @@ WiFi 連線設定
 
 **離開書桌判定說明：**
 - 光感低於或等於臨界值時立即判定在桌前
-- 光感高於臨界值必須連續達到 `presence_timeout_min` 分鐘，才會判定離開書桌
-- 回到臨界值以內時立即恢復在桌前狀態
+- 光感高於臨界值必須連續達到 `presence_leave_timeout_sec` 秒，才會判定離開書桌
+- 回到臨界值以內必須連續達到 `presence_return_timeout_sec` 秒，才會恢復在桌前狀態
+- `presence_return_timeout_sec` 設為 `0` 時，回到臨界值以內會立即恢復在席
 
 #### `profile.chime`
 定時響聲設定

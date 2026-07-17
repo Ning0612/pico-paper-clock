@@ -79,7 +79,8 @@ class ConfigManager:
                     "user": {
                         "birthday": "0101",
                         "light_threshold": 56000,
-                        "presence_timeout_min": 3,
+                        "presence_leave_timeout_sec": 180,
+                        "presence_return_timeout_sec": 10,
                         "image_interval_min": 2,
                         "timezone_offset": 8
                     },
@@ -102,6 +103,9 @@ class ConfigManager:
             print("Info: Detecting legacy config format. Migrating to multi-profile format...")
 
             legacy = self.config
+            legacy_leave_timeout_sec = self._clamp_int(
+                legacy.get("user", {}).get("presence_timeout_min"), 1, 60, 3
+            ) * 60
             new_config = {
                 "schema_version": CONFIG_SCHEMA_VERSION,
                 "global": {
@@ -128,7 +132,8 @@ class ConfigManager:
                         "user": {
                             "birthday": legacy.get("user", {}).get("birthday", "0101"),
                             "light_threshold": legacy.get("user", {}).get("light_threshold", 56000),
-                            "presence_timeout_min": legacy.get("user", {}).get("presence_timeout_min", 3),
+                            "presence_leave_timeout_sec": legacy_leave_timeout_sec,
+                            "presence_return_timeout_sec": 10,
                             "image_interval_min": legacy.get("user", {}).get("image_interval_min", 2),
                             "timezone_offset": legacy.get("user", {}).get("timezone_offset", 8)
                         },
@@ -195,12 +200,22 @@ class ConfigManager:
                 changed = True
 
             user = profile["user"]
+            legacy_leave_timeout_min = user.get("presence_timeout_min")
+            has_leave_timeout_sec = "presence_leave_timeout_sec" in user
             normalized = {
                 "light_threshold": self._clamp_int(user.get("light_threshold"), 0, 65535, 56000),
-                "presence_timeout_min": self._clamp_int(user.get("presence_timeout_min"), 1, 60, 3),
+                "presence_leave_timeout_sec": self._clamp_int(user.get("presence_leave_timeout_sec"), 60, 3600, 180),
+                "presence_return_timeout_sec": self._clamp_int(user.get("presence_return_timeout_sec"), 0, 60, 10),
                 "image_interval_min": self._clamp_int(user.get("image_interval_min"), 1, 60, 2),
                 "timezone_offset": self._clamp_int(user.get("timezone_offset"), -12, 14, 8),
             }
+            if not has_leave_timeout_sec and legacy_leave_timeout_min is not None:
+                normalized["presence_leave_timeout_sec"] = self._clamp_int(
+                    legacy_leave_timeout_min, 1, 60, 3
+                ) * 60
+            if "presence_timeout_min" in user:
+                del user["presence_timeout_min"]
+                changed = True
             chime = profile["chime"]
             normalized_chime = {
                 "pitch": self._clamp_int(chime.get("pitch"), 100, 5000, 880),

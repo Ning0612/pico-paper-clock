@@ -147,7 +147,7 @@ class PresenceMemoryTests(unittest.TestCase):
             self.module.EVENT_FILE = original_event_file
             self.module.DAILY_FILE = original_daily_file
 
-    def test_away_state_waits_for_timeout_and_recovers_immediately(self):
+    def test_away_and_return_states_wait_for_independent_timeouts(self):
         original_paths = {
             name: getattr(self.module, name)
             for name in ("EVENT_FILE", "DAILY_FILE", "PENDING_FILE", "PENDING_SESSION_FILE")
@@ -169,22 +169,26 @@ class PresenceMemoryTests(unittest.TestCase):
                 self.module.time.mktime = lambda value: value[3] * 3600 + value[4] * 60 + value[5]
 
                 manager = self.module.PresenceManager()
-                manager.update(100, 200, local_time(0), 3)
-                manager.update(300, 200, local_time(120), 3)
+                manager.update(100, 200, local_time(0), 180, 10)
+                manager.update(300, 200, local_time(120), 180, 10)
                 self.assertEqual(manager.get_status()["state"], 1)
-                manager.update(100, 200, local_time(150), 3)
+                manager.update(100, 200, local_time(150), 180, 10)
                 self.assertEqual(manager.get_status()["state"], 1)
 
-                manager.update(300, 200, local_time(180), 3)
-                manager.update(300, 200, local_time(360), 3)
+                manager.update(300, 200, local_time(180), 180, 10)
+                manager.update(300, 200, local_time(360), 180, 10)
                 self.assertEqual(manager.get_status()["state"], 0)
+                manager.update(100, 200, local_time(361), 180)
+                self.assertEqual(manager.get_status()["state"], 0)
+                manager.update(100, 200, local_time(370), 180)
+                self.assertEqual(manager.get_status()["state"], 0)
+                manager.update(100, 200, local_time(371), 180)
+                self.assertEqual(manager.get_status()["state"], 1)
+
                 self.assertEqual(
                     [line.split(",")[2] for line in Path(self.module.EVENT_FILE).read_text().splitlines()],
-                    ["1", "0"],
+                    ["1", "0", "1"],
                 )
-
-                manager.update(100, 200, local_time(361), 3)
-                self.assertEqual(manager.get_status()["state"], 1)
         finally:
             self.module.time.mktime = original_mktime
             for name, value in original_paths.items():
@@ -213,10 +217,44 @@ class PresenceMemoryTests(unittest.TestCase):
                 self.module.time.mktime = lambda value: value[3] * 3600 + value[4] * 60 + value[5]
 
                 manager = self.module.PresenceManager()
-                manager.update(300, 200, local_time(600), 3)
+                manager.update(300, 200, local_time(600), 180, 10)
                 self.assertEqual(manager.get_status()["state"], 1)
-                manager.update(300, 200, local_time(780), 3)
+                manager.update(300, 200, local_time(780), 180, 10)
                 self.assertEqual(manager.get_status()["state"], 0)
+        finally:
+            self.module.time.mktime = original_mktime
+            for name, value in original_paths.items():
+                setattr(self.module, name, value)
+
+    def test_restored_away_state_waits_for_return_timeout(self):
+        original_paths = {
+            name: getattr(self.module, name)
+            for name in ("EVENT_FILE", "DAILY_FILE", "PENDING_FILE", "PENDING_SESSION_FILE")
+        }
+        original_mktime = self.module.time.mktime
+
+        def local_time(seconds):
+            hours, remainder = divmod(seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return (2026, 7, 15, hours, minutes, seconds, 2, 0)
+
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.module.EVENT_FILE = str(root / "events.log")
+                self.module.DAILY_FILE = str(root / "daily.log")
+                self.module.PENDING_FILE = str(root / "summary.log")
+                self.module.PENDING_SESSION_FILE = str(root / "session.log")
+                Path(self.module.EVENT_FILE).write_text("20260715,000000,0,300\n", encoding="utf-8")
+                self.module.time.mktime = lambda value: value[3] * 3600 + value[4] * 60 + value[5]
+
+                manager = self.module.PresenceManager()
+                manager.update(100, 200, local_time(600), 180, 10)
+                self.assertEqual(manager.get_status()["state"], 0)
+                manager.update(100, 200, local_time(609), 180, 10)
+                self.assertEqual(manager.get_status()["state"], 0)
+                manager.update(100, 200, local_time(610), 180, 10)
+                self.assertEqual(manager.get_status()["state"], 1)
         finally:
             self.module.time.mktime = original_mktime
             for name, value in original_paths.items():

@@ -105,8 +105,15 @@ class AppController:
             discord_used_network = self.presence.flush_discord()
 
         light_threshold = config_manager.get("user.light_threshold", 55000)
-        presence_timeout_min = config_manager.get("user.presence_timeout_min", 3)
-        self.presence.update(adc_value, light_threshold, t, presence_timeout_min)
+        presence_leave_timeout_sec = config_manager.get("user.presence_leave_timeout_sec", 180)
+        presence_return_timeout_sec = config_manager.get("user.presence_return_timeout_sec", 10)
+        self.presence.update(
+            adc_value,
+            light_threshold,
+            t,
+            presence_leave_timeout_sec,
+            presence_return_timeout_sec,
+        )
         time_since_touch = time.time() - self.state.last_touch_time if self.state.last_touch_time != -1 else 3601
 
         # If ambient light is below threshold (screen should be off) or time since last touch is less than 1 hour

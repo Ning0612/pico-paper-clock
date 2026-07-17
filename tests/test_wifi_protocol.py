@@ -360,7 +360,7 @@ class WifiProtocolTests(unittest.TestCase):
             self.module.iter_lines = original_iter_lines
             self.module._presence_epoch = original_presence_epoch
 
-    def test_config_save_preserves_presence_timeout(self):
+    def test_config_save_preserves_independent_presence_timeouts(self):
         self.config.last_profile_update = None
         params = {
             "original_profile_name": "Home",
@@ -370,7 +370,8 @@ class WifiProtocolTests(unittest.TestCase):
             "location": "Taipei",
             "birthday": "0101",
             "light_threshold": "20000",
-            "presence_timeout_min": "7",
+            "presence_leave_timeout_sec": "420",
+            "presence_return_timeout_sec": "15",
             "image_interval_min": "2",
             "timezone_offset": "8",
             "chime_interval": "hourly",
@@ -381,14 +382,22 @@ class WifiProtocolTests(unittest.TestCase):
 
         self.assertIsNotNone(self.config.last_profile_update)
         self.assertEqual(
-            self.config.last_profile_update[1]["user"]["presence_timeout_min"],
-            7,
+            self.config.last_profile_update[1]["user"]["presence_leave_timeout_sec"],
+            420,
+        )
+        self.assertEqual(
+            self.config.last_profile_update[1]["user"]["presence_return_timeout_sec"],
+            15,
         )
 
-        params["presence_timeout_min"] = "0"
+        params["presence_leave_timeout_sec"] = "59"
         with self.assertRaises(ValueError):
             self.module._save_settings_from_params(params)
-        params["presence_timeout_min"] = "61"
+        params["presence_leave_timeout_sec"] = "3601"
+        with self.assertRaises(ValueError):
+            self.module._save_settings_from_params(params)
+        params["presence_leave_timeout_sec"] = "180"
+        params["presence_return_timeout_sec"] = "-1"
         with self.assertRaises(ValueError):
             self.module._save_settings_from_params(params)
 
