@@ -194,6 +194,37 @@ class PresenceMemoryTests(unittest.TestCase):
             for name, value in original_paths.items():
                 setattr(self.module, name, value)
 
+    def test_update_reports_only_confirmed_away_transition(self):
+        original_paths = {
+            name: getattr(self.module, name)
+            for name in ("EVENT_FILE", "DAILY_FILE", "PENDING_FILE", "PENDING_SESSION_FILE")
+        }
+        original_mktime = self.module.time.mktime
+
+        def local_time(seconds):
+            hours, remainder = divmod(seconds, 3600)
+            minutes, seconds = divmod(remainder, 60)
+            return (2026, 7, 15, hours, minutes, seconds, 2, 0)
+
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.module.EVENT_FILE = str(root / "events.log")
+                self.module.DAILY_FILE = str(root / "daily.log")
+                self.module.PENDING_FILE = str(root / "summary.log")
+                self.module.PENDING_SESSION_FILE = str(root / "session.log")
+                self.module.time.mktime = lambda value: value[3] * 3600 + value[4] * 60 + value[5]
+
+                manager = self.module.PresenceManager()
+                self.assertFalse(manager.update(100, 200, local_time(0), 3, 10))
+                self.assertFalse(manager.update(300, 200, local_time(1), 3, 10))
+                self.assertTrue(manager.update(300, 200, local_time(4), 3, 10))
+                self.assertFalse(manager.update(300, 200, local_time(5), 3, 10))
+        finally:
+            self.module.time.mktime = original_mktime
+            for name, value in original_paths.items():
+                setattr(self.module, name, value)
+
     def test_restored_open_session_starts_away_timeout_from_first_sample(self):
         original_paths = {
             name: getattr(self.module, name)

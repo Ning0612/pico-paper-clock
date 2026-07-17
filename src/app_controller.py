@@ -5,7 +5,7 @@ from config_manager import config_manager
 from netutils import sync_time, get_local_time
 from weather import fetch_current_weather, fetch_weather_forecast
 from display_manager import update_page_weather, update_page_time_image, update_page_birthday, update_page_image_preview
-from display_utils import release_display_workspace
+from display_utils import clear_display_and_sleep, release_display_workspace
 from image_manager import image_catalog, image_store
 from wifi_manager import reset_wifi_and_reboot
 from chime import Chime
@@ -107,17 +107,20 @@ class AppController:
         light_threshold = config_manager.get("user.light_threshold", 55000)
         presence_leave_timeout_sec = config_manager.get("user.presence_leave_timeout_sec", 180)
         presence_return_timeout_sec = config_manager.get("user.presence_return_timeout_sec", 10)
-        self.presence.update(
+        entered_away = self.presence.update(
             adc_value,
             light_threshold,
             t,
             presence_leave_timeout_sec,
             presence_return_timeout_sec,
         )
-        time_since_touch = time.time() - self.state.last_touch_time if self.state.last_touch_time != -1 else 3601
-
-        # If ambient light is below threshold (screen should be off) or time since last touch is less than 1 hour
-        if adc_value <= light_threshold or time_since_touch < 3600:         
+        if entered_away:
+            clear_display_and_sleep()
+            self.state.is_first_run = True
+            self.state.partial_update = False
+        # Drive the display from the debounced presence state so both transitions
+        # honor their configured timeout instead of reacting to raw ADC changes.
+        if self.presence.current_state is True:
             # If date has changed
             self._handle_date_change(t[2])
 

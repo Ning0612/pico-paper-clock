@@ -42,6 +42,7 @@ class TestFrameBuffer:
 
     def fill(self, color):
         self.fill_color = color
+        self.buffer[:] = bytes([color * 255]) * len(self.buffer)
 
 
 class TestEpd:
@@ -50,6 +51,7 @@ class TestEpd:
     def __init__(self):
         self.init_calls = 0
         self.base_buffers = []
+        self.sleep_calls = 0
         TestEpd.instances.append(self)
 
     def init(self):
@@ -57,6 +59,9 @@ class TestEpd:
 
     def display_Base(self, buffer):
         self.base_buffers.append(buffer)
+
+    def sleep(self):
+        self.sleep_calls += 1
 
 
 class DisplayMappingTests(unittest.TestCase):
@@ -148,6 +153,50 @@ class DisplayMappingTests(unittest.TestCase):
             self.assertIsNone(self.module._display_native_framebuffer)
             self.assertIsNone(self.module._display_canvas)
             self.assertIsNone(self.module._display_epd)
+        finally:
+            self.module.framebuf.FrameBuffer = original_framebuffer
+            if original_epaper is None:
+                sys.modules.pop("epaper", None)
+            else:
+                sys.modules["epaper"] = original_epaper
+            (
+                self.module._display_native_buffer,
+                self.module._display_native_framebuffer,
+                self.module._display_canvas,
+                self.module._display_epd,
+            ) = original_values
+
+    def test_clear_display_and_sleep_uses_a_full_white_refresh(self):
+        original_framebuffer = self.module.framebuf.FrameBuffer
+        original_epaper = sys.modules.get("epaper")
+        original_values = (
+            self.module._display_native_buffer,
+            self.module._display_native_framebuffer,
+            self.module._display_canvas,
+            self.module._display_epd,
+        )
+        fake_epaper = types.ModuleType("epaper")
+        fake_epaper.EPD_2in9 = TestEpd
+        self.module.framebuf.FrameBuffer = TestFrameBuffer
+        sys.modules["epaper"] = fake_epaper
+        TestEpd.instances = []
+        try:
+            self.module._display_native_buffer = None
+            self.module._display_native_framebuffer = None
+            self.module._display_canvas = None
+            self.module._display_epd = None
+
+            self.module.clear_display_and_sleep()
+
+            self.assertEqual(len(TestEpd.instances), 1)
+            self.assertEqual(TestEpd.instances[0].init_calls, 1)
+            self.assertEqual(TestEpd.instances[0].sleep_calls, 1)
+            self.assertEqual(
+                set(TestEpd.instances[0].base_buffers[0]),
+                {0xFF},
+            )
+            self.module.display_rotated_screen(lambda _canvas: None)
+            self.assertEqual(TestEpd.instances[0].init_calls, 2)
         finally:
             self.module.framebuf.FrameBuffer = original_framebuffer
             if original_epaper is None:

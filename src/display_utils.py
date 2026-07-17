@@ -165,3 +165,14 @@ def display_rotated_screen(draw_callback, angle=90, partial_update=False):
     else:
         _display_epd.display_Base(_display_native_buffer)
     gc.collect()
+
+
+def _draw_blank(_canvas):
+    pass
+
+
+def clear_display_and_sleep():
+    """Refreshes the panel to white, then puts the e-paper driver to sleep."""
+    global _display_epd
+    display_rotated_screen(_draw_blank, partial_update=False)
+    _display_epd.sleep()

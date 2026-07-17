@@ -271,7 +271,7 @@ class PresenceManager:
         self.last_update_epoch = now_epoch
 
         if self.current_date is None:
-            self._restore_day(
+            return self._restore_day(
                 date,
                 local_time,
                 now_epoch,
@@ -280,12 +280,11 @@ class PresenceManager:
                 leave_timeout_sec,
                 return_timeout_sec,
             )
-            return
 
         if date != self.current_date:
             self._rollover_day(date, local_time, now_epoch)
 
-        self._apply_sensor_state(
+        return self._apply_sensor_state(
             at_desk,
             local_time,
             now_epoch,
@@ -320,30 +319,31 @@ class PresenceManager:
             self.return_since_epoch = None
             if at_desk:
                 self.away_since_epoch = None
-                return
+                return False
             if self.away_since_epoch is None:
                 self.away_since_epoch = now_epoch
-                return
+                return False
             if not self._timeout_elapsed(now_epoch, self.away_since_epoch, leave_timeout_sec):
-                return
+                return False
             self.away_since_epoch = None
             self._transition(local_time, now_epoch, False, adc_value)
-            return
+            return True
 
         self.away_since_epoch = None
         if not at_desk:
             self.return_since_epoch = None
-            return
+            return False
         if return_timeout_sec == 0:
             self._transition(local_time, now_epoch, True, adc_value)
-            return
+            return False
         if self.return_since_epoch is None:
             self.return_since_epoch = now_epoch
-            return
+            return False
         if not self._timeout_elapsed(now_epoch, self.return_since_epoch, return_timeout_sec):
-            return
+            return False
         self.return_since_epoch = None
         self._transition(local_time, now_epoch, True, adc_value)
+        return False
 
     def _transition(self, local_time, now_epoch, at_desk, adc_value):
         self.away_since_epoch = None
@@ -515,8 +515,9 @@ class PresenceManager:
 
         if last_state is None and not restored_open_session:
             self._record_transition(local_time, at_desk, adc_value)
+            return False
         else:
-            self._apply_sensor_state(
+            return self._apply_sensor_state(
                 at_desk,
                 local_time,
                 now_epoch,

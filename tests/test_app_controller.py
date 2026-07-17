@@ -25,6 +25,7 @@ class AppControllerDateChangeTests(unittest.TestCase):
             )
         }
         cls.sync_calls = []
+        cls.clear_calls = []
 
         config_module = types.ModuleType("config_manager")
         config_module.config_manager = types.SimpleNamespace(
@@ -55,6 +56,7 @@ class AppControllerDateChangeTests(unittest.TestCase):
 
         display_utils_module = types.ModuleType("display_utils")
         display_utils_module.release_display_workspace = lambda: None
+        display_utils_module.clear_display_and_sleep = lambda: cls.clear_calls.append(True)
         sys.modules["display_utils"] = display_utils_module
 
         image_module = types.ModuleType("image_manager")
@@ -96,6 +98,7 @@ class AppControllerDateChangeTests(unittest.TestCase):
 
     def setUp(self):
         self.sync_calls.clear()
+        self.clear_calls.clear()
 
     def test_new_day_resets_weather_retry_gates(self):
         state = types.SimpleNamespace(
@@ -169,6 +172,67 @@ class AppControllerDateChangeTests(unittest.TestCase):
                 delattr(time, "ticks_diff")
             else:
                 time.ticks_diff = original_ticks_diff
+
+    def test_confirmed_away_transition_clears_display_once(self):
+        class FakePresence:
+            def __init__(self):
+                self.states = iter((True, False, False, True))
+                self.responses = iter((False, True, False, False))
+                self.current_state = None
+
+            def update(self, *_args):
+                self.current_state = next(self.states)
+                return next(self.responses)
+
+            def flush_discord(self):
+                return False
+
+        state = types.SimpleNamespace(
+            last_touch_time=-1,
+            is_first_run=False,
+            partial_update=True,
+            last_minute=-1,
+        )
+        adc_values = iter((200, 60000, 200, 200))
+        hardware = types.SimpleNamespace(
+            get_adc_value=lambda: next(adc_values),
+            get_touch_state=lambda: None,
+            handle_button_long_press=lambda _callback: None,
+        )
+        class TestController(self.module.AppController):
+            pass
+
+        controller = object.__new__(TestController)
+        controller.state = state
+        controller.hw = hardware
+        controller.lan_server = None
+        controller.presence = FakePresence()
+        controller.time_zone_offset = 8
+        controller._send_startup_discord_if_ready = lambda: False
+        controller._startup_discord_pending = lambda: False
+        display_updates = []
+        controller._handle_date_change = lambda _day: False
+        controller._perform_chime = lambda _time: None
+        controller._update_sensor_data = lambda: None
+        controller._update_weather = lambda: False
+        controller._update_display = lambda _time: display_updates.append(True)
+        controller.handle_touch = lambda _touch: None
+
+        original_consume_preview = getattr(self.module.image_store, "consume_preview", None)
+        self.module.image_store.consume_preview = lambda: None
+        try:
+            for _ in range(4):
+                controller.run_main_loop()
+        finally:
+            if original_consume_preview is None:
+                delattr(self.module.image_store, "consume_preview")
+            else:
+                self.module.image_store.consume_preview = original_consume_preview
+
+        self.assertEqual(self.clear_calls, [True])
+        self.assertEqual(len(display_updates), 2)
+        self.assertFalse(state.is_first_run)
+        self.assertTrue(state.partial_update)
 
 
 if __name__ == "__main__":

@@ -499,7 +499,7 @@ class EPD_2in9:
         self.send_data(0x01)
         
         self.config.delay_ms(2000)
-        self.module_exit()
+        self.config.module_exit()
 
 
 class ICNT_Development():
