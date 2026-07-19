@@ -137,29 +137,25 @@ def decompress(data: bytes, expected_length: int | None = None) -> tuple[bytes, 
     return bytes(output), hlsb
 
 
+def encode_ppc1(data: bytes, hlsb: bool = True) -> bytes:
+    """Return a PPC1 payload, even when it is larger than the raw payload."""
+    return compress(data, hlsb=hlsb)
+
+
 def encode_if_smaller(data: bytes, hlsb: bool = True) -> bytes:
-    """Return PPC1 only when its complete file payload is smaller than raw data."""
-    encoded = compress(data, hlsb=hlsb)
-    return encoded if len(encoded) < len(data) else data
+    """Backward-compatible alias for the PPC1-only image output policy."""
+    return encode_ppc1(data, hlsb=hlsb)
 
 
 def write_image(path: str | Path, data: bytes, hlsb: bool = True) -> bytes:
-    """Write the smallest compatible representation and return stored bytes."""
+    """Write a self-describing PPC1 image and remove any stale sidecar."""
     output = Path(path)
-    stored = encode_if_smaller(data, hlsb=hlsb)
+    stored = encode_ppc1(data, hlsb=hlsb)
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_bytes(stored)
     marker = Path(str(output) + ".hlsb")
-    if is_compressed(stored):
-        try:
-            marker.unlink()
-        except FileNotFoundError:
-            pass
-    elif hlsb:
-        marker.write_bytes(b"1")
-    else:
-        try:
-            marker.unlink()
-        except FileNotFoundError:
-            pass
+    try:
+        marker.unlink()
+    except FileNotFoundError:
+        pass
     return stored

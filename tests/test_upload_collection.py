@@ -7,7 +7,7 @@ from tools.pico_image_tool.conversion import save_bin
 
 
 class UploadCollectionTests(unittest.TestCase):
-    def test_serial_deploy_collects_hlsb_sidecar_with_image(self):
+    def test_serial_deploy_collects_only_ppc1_bin_image(self):
         with tempfile.TemporaryDirectory() as temp:
             source = Path(temp) / "src"
             image = source / "image" / "custom" / "sample.bin"
@@ -25,7 +25,7 @@ class UploadCollectionTests(unittest.TestCase):
                 upload.UPLOAD_IMAGES = original_images
                 upload.NO_CONFIG = original_no_config
             self.assertIn("image/custom/sample.bin", relative)
-            self.assertIn("image/custom/sample.bin.hlsb", relative)
+            self.assertNotIn("image/custom/sample.bin.hlsb", relative)
 
 
 if __name__ == "__main__":

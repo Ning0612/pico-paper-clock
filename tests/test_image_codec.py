@@ -1,7 +1,16 @@
 import random
 import unittest
 
-from tools.pico_image_tool.image_codec import compress, decompress, encode_if_smaller
+from pathlib import Path
+import tempfile
+
+from tools.pico_image_tool.image_codec import (
+    compress,
+    decompress,
+    encode_if_smaller,
+    is_compressed,
+    write_image,
+)
 
 
 class ImageCodecTests(unittest.TestCase):
@@ -19,9 +28,24 @@ class ImageCodecTests(unittest.TestCase):
         self.assertEqual(decoded, data)
         self.assertFalse(hlsb)
 
-    def test_codec_keeps_raw_when_compression_is_not_smaller(self):
+    def test_codec_uses_self_describing_ppc1_when_compression_is_not_smaller(self):
         data = random.Random(12345).randbytes(2048)
-        self.assertEqual(encode_if_smaller(data), data)
+        encoded = encode_if_smaller(data)
+        self.assertTrue(is_compressed(encoded))
+        decoded, hlsb = decompress(encoded, len(data))
+        self.assertEqual(decoded, data)
+        self.assertTrue(hlsb)
+
+    def test_write_image_removes_stale_sidecar(self):
+        with tempfile.TemporaryDirectory() as temp:
+            output = Path(temp) / "sample.bin"
+            marker = Path(str(output) + ".hlsb")
+            marker.write_bytes(b"1")
+
+            stored = write_image(output, b"\x05", hlsb=True)
+
+            self.assertTrue(is_compressed(stored))
+            self.assertFalse(marker.exists())
 
 
 if __name__ == "__main__":

@@ -138,7 +138,7 @@ def build_deploy_plan(options: DeployOptions) -> DeployPlan:
             entries.append(DeployEntry(config_path, "config.json", config_path.stat().st_size, "config"))
 
     if options.include_images:
-        _add_files(entries, source_dir, source_dir / "image", (".bin", ".bin.hlsb"), "images")
+        _add_files(entries, source_dir, source_dir / "image", (".bin",), "images")
 
     if options.include_webui:
         _add_files(entries, source_dir, source_dir / "html", (".bin",), "webui")

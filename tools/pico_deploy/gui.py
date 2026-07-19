@@ -177,7 +177,7 @@ class PicoDeployTool(tk.Tk):
         }
         ttk.Checkbutton(controls, text="Python / JSON（保留 config 另行控制）", variable=self.deploy_vars["code"]).pack(anchor="w")
         ttk.Checkbutton(controls, text="覆寫 config.json（危險）", variable=self.deploy_vars["config"]).pack(anchor="w")
-        ttk.Checkbutton(controls, text="裝置圖片與 .hlsb sidecar", variable=self.deploy_vars["images"]).pack(anchor="w")
+        ttk.Checkbutton(controls, text="裝置圖片（PPC1 .bin）", variable=self.deploy_vars["images"]).pack(anchor="w")
         ttk.Checkbutton(controls, text="生成 WebUI .bin", variable=self.deploy_vars["webui"]).pack(anchor="w")
         ttk.Separator(controls).pack(fill="x", pady=8)
         ttk.Checkbutton(controls, text="清理本次 manifest 舊檔", variable=self.deploy_vars["clean"]).pack(anchor="w")

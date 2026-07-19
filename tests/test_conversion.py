@@ -31,14 +31,19 @@ class ConversionTests(unittest.TestCase):
                     result = convert_image(source, ConversionOptions(target=target, dither="threshold"))
                     self.assertEqual(len(result.data), expected)
 
-    def test_save_bin_writes_serial_deploy_format_marker(self):
+    def test_save_bin_writes_self_describing_ppc1_without_sidecar(self):
         from tools.pico_image_tool.conversion import save_bin
+        from tools.pico_image_tool.image_codec import decompress, is_compressed
 
         with tempfile.TemporaryDirectory() as temp:
             output = Path(temp) / "sample.bin"
             save_bin(output, b"\x05")
-            self.assertEqual(output.read_bytes(), b"\x05")
-            self.assertEqual(Path(str(output) + ".hlsb").read_bytes(), b"1")
+            stored = output.read_bytes()
+            decoded, hlsb = decompress(stored, 1)
+            self.assertTrue(is_compressed(stored))
+            self.assertEqual(decoded, b"\x05")
+            self.assertTrue(hlsb)
+            self.assertFalse(Path(str(output) + ".hlsb").exists())
 
     def test_dithering_algorithms_are_deterministic(self):
         with tempfile.TemporaryDirectory() as temp:

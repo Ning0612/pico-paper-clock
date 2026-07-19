@@ -44,7 +44,7 @@ class DeployerTests(unittest.TestCase):
 
             self.assertEqual(
                 [entry.remote_path for entry in plan.entries],
-                ["html/settings.bin", "image/custom/a.bin", "image/custom/a.bin.hlsb", "main.py"],
+                ["html/settings.bin", "image/custom/a.bin", "main.py"],
             )
             self.assertNotIn("config.json", [entry.remote_path for entry in plan.entries])
 

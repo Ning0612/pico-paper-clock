@@ -4,7 +4,7 @@
 
 ## 資產目錄
 
-所有裝置圖片位於 `src/image/`，以 1-bit bitmap 儲存。新工具會在 PPC1 壓縮後較小時使用壓縮格式；無法縮小時才保留 raw payload：
+所有裝置圖片位於 `src/image/`，以 1-bit bitmap 儲存。新工具一律輸出帶 PPC1 header 的 `.bin`；即使壓縮後稍大，也不會產生 `.bin.hlsb` sidecar：
 
 | 路徑 | 用途 | 尺寸 |
 |---|---|---:|
@@ -55,7 +55,7 @@ CLI 範例：
 
 raw payload 的 canonical `MONO_HLSB` 是每個 packed byte 的 bit 0 代表最左側像素。PPC1 header 會自行保存 bit order，裝置以 256-byte history、512-byte input buffer 與 row buffer 逐列解壓，不會配置整張圖片。
 
-- raw 圖片會使用 `.hlsb` sidecar 標記 HLSB；沒有 marker 的既有 raw 資產仍按舊版 MSB-left 解碼。
-- PPC1 檔案仍使用 `.bin` 副檔名，不需要 sidecar；`tools/pico_deploy/upload_cli.py` 會直接部署 payload。
+- 新工具產生的 `.bin` 一律是 PPC1，header 會保存 HLSB bit order，不需要 sidecar；`tools/pico_deploy/upload_cli.py` 只部署 `.bin`。
+- 韌體仍可讀取既有 raw `.bin` 與 `.bin.hlsb` 相容資產；這些舊資產需轉換成 PPC1 後才能符合「只有 `.bin`」的檔案規則。
 
 圖片 API 目前支援 custom、login、events 三個 collection，尺寸與 byte length 請見 [`IMAGE_API.md`](IMAGE_API.md)。

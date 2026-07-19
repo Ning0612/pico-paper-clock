@@ -47,9 +47,10 @@ main.py
 
 ## 圖片格式與相容性
 
-- raw 圖片 payload 的 canonical 格式是 `MONO_HLSB`，每個 byte 的 bit 0 是最左像素；新工具會優先寫入 PPC1 壓縮格式。
+- raw 圖片 payload 的 canonical 格式是 `MONO_HLSB`，每個 byte 的 bit 0 是最左像素；新工具一律寫入帶 HLSB header 的 PPC1 `.bin`。
 - PPC1 header 保存 bit order，裝置透過 256-byte history、512-byte input buffer 與既有 row buffer 逐列解壓，不把整張圖片載入 RAM。
-- raw API 上傳與桌面工具保存會建立 `.hlsb` sidecar；PPC1 不需要 sidecar。
+- 新工具與 USB manifest 不建立或部署 `.hlsb` sidecar；PPC1 自帶 bit order metadata。
+- 韌體仍接受 raw API／既有 raw 資產的 `.hlsb` marker，以維持升級相容性。
 - 沒有 marker 的既有 repository／舊版 runtime raw `.bin` 仍按 MSB-left 解碼，避免升級時破壞既有圖片。
 - `custom`／`events` 為 `128 × 128`、2048 bytes；`login` 為 `296 × 128`、4736 bytes。
 

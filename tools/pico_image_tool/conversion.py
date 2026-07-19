@@ -177,14 +177,11 @@ def convert_image(path: str | Path, options: ConversionOptions) -> ConversionRes
 
 
 def save_bin(path: str | Path, data: bytes) -> Path:
-    output = Path(path)
-    output.parent.mkdir(parents=True, exist_ok=True)
-    output.write_bytes(data)
-    Path(str(output) + ".hlsb").write_bytes(b"1")
-    return output
+    """Save a self-describing PPC1 bitmap using the .bin extension."""
+    return save_compressed_bin(path, data)
 
 
 def save_compressed_bin(path: str | Path, data: bytes) -> Path:
-    """Save a bitmap using PPC1 when it is smaller than the raw payload."""
+    """Save a bitmap as a self-describing PPC1 .bin payload."""
     write_image(path, data, hlsb=True)
     return Path(path)
