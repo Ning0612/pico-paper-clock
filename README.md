@@ -8,6 +8,8 @@
 
 基於 Raspberry Pi Pico W 與 Waveshare 2.9 吋觸控電子紙的 IoT 時鐘。它定位成放在書桌前、低干擾常駐的小顯示器：讓人抬頭即可看到日期、時間、目前天氣、室內溫濕度與喜歡的圖片，也能透過環境光感測器估算並追蹤在書桌前的時間。裝置同時透過 Wi-Fi 提供設定、圖片管理與在席統計頁面。
 
+> **與 [epaper-home-display](https://github.com/Ning0612/epaper-home-display) 的關係**：兩者是各自獨立維護的不同作品。本專案定位為簡易的桌前小時鐘，跑在 Pico W／MicroPython 的 264KB RAM 資源受限環境；epaper-home-display 則是以 Raspberry Pi Zero 2W／Python 打造、整合多種資訊來源的智慧家庭顯示面板。
+
 ![Project Demo](DEMO.jpg)
 
 ## Web UI 預覽
