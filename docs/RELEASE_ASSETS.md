@@ -1,6 +1,6 @@
 # Release assets
 
-大型硬體／韌體發行檔不再提交到 source tree，避免一般 clone 下載不必要的大檔。建立 GitHub Release 時，請從本地 `dist/release-assets/` 附加下列檔案：
+大型硬體／韌體發行檔不再提交到 source tree，避免一般 clone 下載不必要的大檔。`.github/workflows/ci.yml` 會在 `v*` tag 推送時，從 canonical Release 下載下列 UF2／CAD 檔並附加到對應 GitHub Release；桌面工具若存在於該 tag，也會在 Windows runner 建置後一併附加。
 
 | 檔案 | 用途 | SHA-256 |
 |---|---|---|
@@ -27,11 +27,11 @@ v2.3.0 起可附加 Windows x64 桌面工具：
 
 這個 EXE 提供序列資源部署與 LAN/AP 圖片批次上傳，但不內建使用者的 `config.json`、客製圖片或 repository 資源。使用序列部署前，使用者必須選擇含有 `src/` 的 repository/source zip 目錄。Release notes 應同時列出 EXE 的 SHA-256。
 
-## 發布檢查表
+## 發布與回補
 
-1. 建立版本 tag 與 GitHub Release。
-2. 將 `dist/release-assets/` 中該次發布涉及的檔案附加到該 Release（韌體/CAD 變更時附 UF2 與三個 CAD 檔；桌面工具變更時附對應版本的 EXE）。
-3. 發布後確認附加的檔案連結可下載。
+1. 建立並推送版本 tag，例如 `git push origin v2.4.0`；CI 會建立或更新同名 GitHub Release。
+2. 發布後確認附加的檔案連結可下載，並將 CI log 列出的 SHA-256 更新到本文件。
+3. 要回補既有 Release 時，在 GitHub Actions 執行 `CI` 的 **Run workflow**，填入 `release_tag`（例如 `v2.2.0` 或 `v2.3.0`）；`asset_source_tag` 預設使用 `v2.1.1` 的 canonical UF2／CAD assets。
 4. 若更換韌體版本、CAD 檔或桌面工具版本，更新本文件（含檔名、SHA-256 與對應 Release tag 連結）、README 與 CHANGELOG。
 
 `dist/` 已被 `.gitignore` 忽略；請勿將這些檔案重新放回 `firmware/` 或 `hardware/` 後提交。

@@ -3,8 +3,19 @@ name: CI
 on:
   push:
     branches: [main]
+    tags: ['v*']
   pull_request:
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: 'Existing tag whose GitHub Release should receive assets (leave empty for CI only)'
+        required: false
+        type: string
+      asset_source_tag:
+        description: 'Release tag containing the canonical firmware/CAD assets'
+        required: false
+        default: v2.1.1
+        type: string
 
 permissions:
   contents: read
@@ -26,6 +37,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
 
       - name: Set up Python
         uses: actions/setup-python@v6
@@ -68,3 +81,110 @@ jobs:
 
       - name: Run unit tests
         run: python -m unittest discover -s tests -v
+
+  release-assets:
+    name: Publish GitHub Release assets
+    if: >-
+      startsWith(github.ref, 'refs/tags/v') ||
+      (github.event_name == 'workflow_dispatch' && inputs.release_tag != '')
+    needs: test
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      RELEASE_TAG: ${{ inputs.release_tag || github.ref_name }}
+      ASSET_SOURCE_TAG: ${{ inputs.asset_source_tag || 'v2.1.1' }}
+
+    steps:
+      - name: Check out release tag
+        uses: actions/checkout@v6
+        with:
+          ref: ${{ inputs.release_tag || github.ref }}
+
+      - name: Set up release build Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+
+      - name: Download canonical firmware and CAD assets
+        shell: pwsh
+        run: |
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE 'dist\release-assets'
+          New-Item -ItemType Directory -Force -Path $assetDir | Out-Null
+
+          $assetNames = @(
+            'pico-paper-clock-micropython-1.24.1.uf2',
+            'pico-paper-clock-v3-case.SLDPRT',
+            'pico-paper-clock-v3-case.step',
+            'pico-paper-clock-v3-case.stl'
+          )
+
+          foreach ($assetName in $assetNames) {
+            & gh release download $env:ASSET_SOURCE_TAG `
+              --repo $env:GITHUB_REPOSITORY `
+              --pattern $assetName `
+              --dir $assetDir `
+              --clobber
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to download $assetName from release $env:ASSET_SOURCE_TAG."
+            }
+          }
+
+      - name: Build desktop tool when supported by the release tag
+        shell: pwsh
+        run: |
+          if (-not (Test-Path 'tools\PicoPaperClockTool.spec')) {
+            Write-Host 'This release tag does not contain the desktop tool build spec.'
+            exit 0
+          }
+
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt -r requirements-dev.txt
+          python -m PyInstaller --noconfirm --clean --distpath dist --workpath build tools\PicoPaperClockTool.spec
+
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE 'dist\release-assets'
+          $assetName = "pico-paper-clock-tool-$env:RELEASE_TAG-windows-x64.exe"
+          Move-Item -LiteralPath 'dist\PicoPaperClockTool.exe' -Destination (Join-Path $assetDir $assetName) -Force
+
+      - name: Verify and upload release assets
+        shell: pwsh
+        run: |
+          $assetDir = Join-Path $env:GITHUB_WORKSPACE 'dist\release-assets'
+          $requiredAssets = @(
+            'pico-paper-clock-micropython-1.24.1.uf2',
+            'pico-paper-clock-v3-case.SLDPRT',
+            'pico-paper-clock-v3-case.step',
+            'pico-paper-clock-v3-case.stl'
+          )
+
+          foreach ($assetName in $requiredAssets) {
+            $assetPath = Join-Path $assetDir $assetName
+            if (-not (Test-Path -LiteralPath $assetPath -PathType Leaf)) {
+              throw "Required release asset is missing: $assetName"
+            }
+            $hash = (Get-FileHash -LiteralPath $assetPath -Algorithm SHA256).Hash
+            Write-Host "$assetName SHA-256 $hash"
+          }
+
+          & gh release view $env:RELEASE_TAG --repo $env:GITHUB_REPOSITORY *> $null
+          if ($LASTEXITCODE -ne 0) {
+            & gh release create $env:RELEASE_TAG `
+              --repo $env:GITHUB_REPOSITORY `
+              --verify-tag `
+              --title $env:RELEASE_TAG `
+              --generate-notes
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to create GitHub Release $env:RELEASE_TAG."
+            }
+          }
+
+          $assetPaths = @(Get-ChildItem -LiteralPath $assetDir -File | Select-Object -ExpandProperty FullName)
+          if ($assetPaths.Count -eq 0) {
+            throw 'No release assets were prepared for upload.'
+          }
+
+          & gh release upload $env:RELEASE_TAG @assetPaths --repo $env:GITHUB_REPOSITORY --clobber
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload assets to GitHub Release $env:RELEASE_TAG."
+          }
