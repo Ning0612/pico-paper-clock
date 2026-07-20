@@ -9,8 +9,9 @@
 | `pico-paper-clock-v3-case.step` | 3D 外殼 v3 跨 CAD 編輯格式（通常相容性較佳） | `B7944ACD80E12A1994B8FEF3095A4F0243009CB6D9F242BA05F93782E54D6B6E` |
 | `pico-paper-clock-v3-case.stl` | 3D 外殼 v3 列印／切片網格 | `4F5417BE263C1B98F8B7706EE529E4FB1154C11D15F5A0BFEFF1943EA877FC01` |
 | `pico-paper-clock-tool-v2.3.0-windows-x64.exe` | Pico 部署工具 Windows x64 GUI | `F3AB32F7E0C005EBABD1852EE4371E8EF7FFFE6768082C3B380FE7D64F8DA859` |
+| `pico-paper-clock-tool-v2.4.0-windows-x64.exe` | Pico 部署工具 Windows x64 GUI | `5871B69B8FD0A88A2C7BEED0977FA927CF77A191283385771DA43D1DF5038064` |
 
-UF2 與三個 CAD 檔目前掛在 [v2.1.1 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.1.1)；桌面部署工具 EXE 隨對應版本發布，目前掛在 [v2.3.0 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.3.0)。UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
+UF2 與三個 CAD 檔目前掛在 [v2.1.1 GitHub Release](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.1.1)；桌面部署工具 EXE 隨對應版本發布，目前掛在 [v2.3.0](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.3.0) 與 [v2.4.0](https://github.com/Ning0612/pico-paper-clock/releases/tag/v2.4.0)。UF2 也可直接使用 [MicroPython 官方 Pico W 下載頁](https://micropython.org/download/RPI_PICO_W/) 的版本。
 
 ## CAD 格式建議
 
@@ -23,7 +24,8 @@ UF2 與三個 CAD 檔目前掛在 [v2.1.1 GitHub Release](https://github.com/Nin
 
 v2.3.0 起可附加 Windows x64 桌面工具：
 
-`pico-paper-clock-tool-v2.3.0-windows-x64.exe`
+- v2.3.0：`pico-paper-clock-tool-v2.3.0-windows-x64.exe`
+- v2.4.0：`pico-paper-clock-tool-v2.4.0-windows-x64.exe`
 
 這個 EXE 提供序列資源部署與 LAN/AP 圖片批次上傳，但不內建使用者的 `config.json`、客製圖片或 repository 資源。使用序列部署前，使用者必須選擇含有 `src/` 的 repository/source zip 目錄。Release notes 應同時列出 EXE 的 SHA-256。
 
