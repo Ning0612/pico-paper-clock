@@ -57,6 +57,32 @@ class PresenceMemoryTests(unittest.TestCase):
         self.assertTrue(manager.discord_disabled)
         self.assertFalse(manager.flush_discord())
 
+    def test_empty_flush_does_not_delay_newly_queued_notification(self):
+        original_pending = self.module.PENDING_FILE
+        original_session_pending = self.module.PENDING_SESSION_FILE
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                self.module.PENDING_FILE = str(Path(directory) / "summary.log")
+                self.module.PENDING_SESSION_FILE = str(Path(directory) / "session.log")
+                sent = []
+                manager = self.module.PresenceManager(
+                    discord_sender=lambda summary: sent.append(("summary", summary)) or True,
+                    session_sender=lambda *values: sent.append(("session", values)) or True,
+                )
+
+                self.assertFalse(manager.flush_discord())
+                manager._queue_session((
+                    "20260715", "090000", "20260715", "090100", 60
+                ))
+
+                self.assertTrue(manager.flush_discord())
+                self.assertEqual(sent, [("session", (
+                    "20260715", "090000", "20260715", "090100", 60
+                ))])
+        finally:
+            self.module.PENDING_FILE = original_pending
+            self.module.PENDING_SESSION_FILE = original_session_pending
+
     def test_startup_flush_drains_pending_session_and_summary_files(self):
         original_pending = self.module.PENDING_FILE
         original_session_pending = self.module.PENDING_SESSION_FILE

@@ -7,6 +7,12 @@
 
 ## [Unreleased]
 
+## [2.4.1] - 2026-07-21
+
+### Fixed
+
+- 修正 Discord 書桌前時段與每日統計通知在主迴圈建立 pending queue 後，被空 queue 的 cooldown 錯誤延後 flush 的問題。
+
 ## [2.3.0] - 2026-07-17
 
 ### Added

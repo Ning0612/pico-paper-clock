@@ -643,9 +643,9 @@ class PresenceManager:
                 return False
         if time.ticks_diff(time.ticks_ms(), self.last_retry_ms) < DISCORD_FLUSH_INTERVAL_MS:
             return False
-        self.last_retry_ms = time.ticks_ms()
         if not self.pending_session and not self.pending_summary:
             return False
+        self.last_retry_ms = time.ticks_ms()
         _release_display_workspace_before_discord()
         sent = False
         if self.flush_summary_first:
