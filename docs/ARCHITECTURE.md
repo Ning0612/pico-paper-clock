@@ -53,6 +53,7 @@ main.py
 - `env_events.log`（15 分鐘取樣、7 天保留）穩態約 17 KiB；`env_daily.log`（每日彙總、366 天保留）穩態約 15 KiB；新增的 `environment.bin` WebUI 資產約 6.7 KiB（實測，`tools/build_html.py` 輸出）。三者合計約 40 KiB 是這次新增功能的穩態 flash 佔用。
 - 裁切/換日時的 `.tmp`/`.bak` 交易寫入（`_commit_tmp`）會暫時需要被重寫檔案的一整份額外空間；`env_events.log` 裁切瞬間約需額外 17 KiB。
 - **實測建議**：完成部署、且 presence／env log 都已跑滿各自的保留視窗（至少一個月）後，應以裝置 REPL 執行 `os.statvfs('/')` 或呼叫 `GET /api/v1/device` 的 storage 欄位覆核實際剩餘空間，不要只依賴這裡的估算值；若明顯吃緊，`env_manager.DAILY_RETENTION_DAYS`（預設 366，比照 `presence_manager.DAILY_RETENTION_DAYS`）可調降以換取空間。
+- **`.py` 原始碼是目前最大宗的 flash 佔用來源**：一台已部署 presence／env 功能且圖片庫有內容的裝置，18 個 `.py` 檔案合計約 226 KB，佔裝置總佔用（307 KB）的 74%，遠超過圖片資產（~50KB）與 Web UI `.bin` 資產（~38KB）。`tools/pico_deploy/upload_cli.py --mpy` 可在部署前用 `mpy-cross` 把 `.py` 預編譯成 `.mpy` bytecode（`epaper.py`／`main.py`／`config.json` 除外，理由見 `CLAUDE.md`「部署至裝置」一節），是目前最有效的省空間手段。**實測**（2026-07-22，裝置 MicroPython 1.24.1）：18 個原始碼檔案從約 226 KB 壓到約 101 KB，裝置剩餘 flash 從 88.0 KiB 提升到 204.0 KiB（多出 116 KiB），比社群估計的 30–50% bytecode 縮減比例更好。**裝置剩餘空間吃緊時建議部署加上 `--mpy`**；這仍是 opt-in 選項而非預設行為——目前沒有部署前韌體版本檢查機制，`mpy-cross` 版號與裝置實際韌體版本漂移會讓 `.mpy` 模組 import 失敗，加上回滾（切回純 `.py`）流程尚未完整驗證，暫不建議設為預設。
 
 ## 圖片格式與相容性
 

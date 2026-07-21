@@ -47,8 +47,11 @@ if (!(Test-Path src\config.json)) { Copy-Item src\config.json.example src\config
 | `--no-config` | 不上傳也不刪除裝置上的 `config.json` |
 | `--no-clean` | 跳過部署前清理 |
 | `--recursive-clean` | 遞迴刪除裝置檔案與目錄後再部署 |
+| `--mpy` | 部署前用 `mpy-cross` 將 `.py` 預編譯為 `.mpy` 省 flash（`epaper.py`／`main.py`／`config.json` 除外），opt-in、非預設行為，需額外 `pip install mpy-cross==1.24.1.post3`（僅部署時需要，裝置本身不需要）；實測可省下裝置約 100 KiB 以上的剩餘空間，細節見 `docs/ARCHITECTURE.md`「Flash 儲存邊界」 |
 
 `--recursive-clean` 會刪除只存在裝置上的網路上傳圖片，除非已完成備份，否則不要使用。REPL 中按 `Ctrl+X` 離開。
+
+**裝置剩餘 flash 空間不足時，建議部署加上 `--mpy`**（例如 `.\.venv\Scripts\python.exe tools\pico_deploy\upload_cli.py --port COM7 --mpy`），可以省下相當可觀的空間；不需要省空間、或想直接在裝置上讀原始碼除錯時，用標準部署（不加 `--mpy`）即可。目前 `mpy-cross` 版號是釘死對應特定韌體版本，尚未成為預設行為。
 
 ## 整合式桌面上傳工具
 
