@@ -63,7 +63,7 @@ Windows 使用者可從 GitHub Release 下載 `PicoPaperClockTool` EXE；從 sou
 
 在 GUI 的「工作階段連線」中選擇含有 `src/` 的 repository 或 source zip 解壓目錄，按「掃描序列埠」後從選單選擇 Pico；LAN/AP 則可掃描後選取或手動輸入。WebUI 帳號固定為 `admin`，只需輸入管理密碼。GUI 會提供：
 
-- 序列部署前以 Tree 預覽 manifest（本機／遠端路徑、分類與大小）、Python/JSON、WebUI、圖片與 config 選項。
+- 序列部署前以 Tree 預覽 manifest（本機／遠端路徑、分類與大小）、Python/JSON、WebUI、圖片與 config 選項，以及「預編譯 .mpy（省 flash，epaper.py／main.py 除外）」勾選框，效果同 CLI 的 `--mpy` opt-in 選項。
 - LAN/AP 圖片批次轉檔、預覽、認證上傳與每張圖片獨立設定。
 - 由序列部署與圖片上傳組成的完整同步作業。
 

@@ -7,6 +7,15 @@
 
 ## [Unreleased]
 
+## [2.5.0] - 2026-07-22
+
+### Added
+
+- 新增環境（溫濕度）歷史記錄功能：`env_manager.py` 預設每 15 分鐘（可透過 `global.env_log.interval_min` 調整）取樣一次 DHT22，原始樣本保留 7 天、每日彙總保留 366 天，離開書桌、螢幕休眠時仍持續記錄；比照 `presence_manager.py` 的交易式寫入與視窗式裁切模式。
+- 新增獨立的環境紀錄 WebUI 頁面 `/environment`，含日/週/月/年趨勢圖切換、今日溫濕度統計卡片與每日統計表格，以及對應的 `/api/env/status`、`/api/env/samples`、`/api/env/daily` 串流 API（見 `docs/ENV_LOG_API.md`）。
+- 新增 `tools/pico_deploy/upload_cli.py --mpy` opt-in 部署選項：部署前用 `mpy-cross` 將 `.py` 預編譯為 `.mpy` bytecode 節省裝置 flash（`epaper.py`／`main.py`／`config.json` 除外），同步加入桌面 GUI 勾選框；實測裝置剩餘 flash 從 88.0 KiB 提升到 204.0 KiB。
+- Discord pending 通知佇列（`presence_pending.log`／`presence_session_pending.log`）新增 7 天保留視窗裁切，避免 webhook 長期失效時無限累積。
+
 ## [2.4.1] - 2026-07-21
 
 ### Fixed

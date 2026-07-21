@@ -4,7 +4,7 @@
 
 ## 資料來源
 
-DHT22 感測器每 `env_log.interval_min`（預設 15 分鐘，設定於 `global.env_log`，見 [`CONFIG_GUIDE.md`](CONFIG_GUIDE.md)）取樣一次，寫入 `env_events.log`（原始樣本，保留 7 天）；每日 00:00 換日時彙總成一筆 `env_daily.log`（每日 min/max/avg，保留 366 天）。取樣獨立於在席狀態與畫面更新，離開書桌、螢幕休眠時仍會持續記錄。
+DHT22 感測器每 `env_log.interval_min`（預設 15 分鐘，設定於 `global.env_log`，見 [`CONFIG_GUIDE.md`](CONFIG_GUIDE.md)）取樣一次，寫入 `env_events.log`（原始樣本）；每日 00:00 換日時彙總成一筆 `env_daily.log`（每日 min/max/avg），同時裁切掉 7 天前的原始樣本與 366 天前的每日彙總。裁切只在換日當下執行，不是即時保證——裝置斷電/關機一段時間後重開機，`env_events.log` 中舊資料要等到下一次換日才會被裁掉，這段期間查詢可能看到超過 7 天的資料。取樣獨立於在席狀態與畫面更新，離開書桌、螢幕休眠時仍會持續記錄。
 
 ## Collections
 
@@ -12,8 +12,8 @@ DHT22 感測器每 `env_log.interval_min`（預設 15 分鐘，設定於 `global
 |---|---|---|
 | `/environment` | GET | 環境紀錄 WebUI 頁面（gzip 過的靜態頁面） |
 | `/api/env/status` | GET | 目前溫濕度與今日 min/max/avg 統計 |
-| `/api/env/samples` | GET | 原始樣本串流（近 7 天） |
-| `/api/env/daily` | GET | 每日彙總串流（近 366 天） |
+| `/api/env/samples` | GET | 原始樣本串流（保留視窗 7 天，於每日換日時裁切，非即時保證，見下方「資料來源」） |
+| `/api/env/daily` | GET | 每日彙總串流（保留視窗 366 天，同上） |
 
 ## `/api/env/status`
 

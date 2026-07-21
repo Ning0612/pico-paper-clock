@@ -23,7 +23,7 @@ main.py
 - 長生命週期 controller、presence、image store/catalog 使用 `__slots__`。
 - Discord webhook 不使用 `urequests.Response` 路徑，改用 raw `ssl` socket：只建立固定大小的 HTTP headers/payload、處理 partial write、讀取 status line 後立即關閉 socket；送出前後執行 `gc.collect()`，並暫時調整 GC threshold 後恢復原值。NTP 會在第一次 TLS 呼叫前同步；目前 firmware tree 尚未附帶 CA trust anchor，因此此連線仍不能宣稱完成憑證鏈／hostname 驗證，正式部署前需補上 CA bundle，不能以不驗證的 TLS 取代。
 - Discord JSON payload 以單一 `bytearray` 組裝，避免字串串接時留下額外完整 payload copy；Discord socket 在建立與 TLS 前會記錄 heap free/allocated telemetry。
-- 啟動通知與 pending Discord queue 在 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試，pending queue 則保留到下一次可用窗口。
+- 啟動通知與 pending Discord queue 在 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試，pending queue 則保留到下一次可用窗口（`presence_pending.log`／`presence_session_pending.log` 另有 7 天保留上限，超過天數的通知會被裁切捨棄，不會無限期等待重試，見下方「Flash 儲存邊界」）。
 - Discord `ENOMEM` 會回傳可重試結果；presence queue 在記憶體壓力後暫停一個 flush interval，之後自動恢復嘗試，不丟棄 pending session/summary。
 - DHT22 使用 2500 ms 最小讀取間隔；讀取失敗改用 10 秒 backoff，保留上一筆快取值，避免感測器錯誤反覆消耗 heap 與刷 serial log。
 - 天氣預報使用 256-byte 固定串流 buffer 與 `readinto()`，逐筆解析 forecast entry；response、entry 暫存物件在處理後釋放並回收，避免一次載入完整 JSON 文件。
@@ -52,7 +52,7 @@ main.py
 - 兩個模組都採「事件/樣本檔＋每日彙總檔」的雙檔設計，並在每日換日時以 `_trim_by_date` 依日期視窗裁切——檔案大小會在保留視窗內收斂到穩定值，不會隨時間無限增長。
 - `env_events.log`（15 分鐘取樣、7 天保留）穩態約 17 KiB；`env_daily.log`（每日彙總、366 天保留）穩態約 15 KiB；新增的 `environment.bin` WebUI 資產約 6.7 KiB（實測，`tools/build_html.py` 輸出）。三者合計約 40 KiB 是這次新增功能的穩態 flash 佔用。
 - 裁切/換日時的 `.tmp`/`.bak` 交易寫入（`_commit_tmp`）會暫時需要被重寫檔案的一整份額外空間；`env_events.log` 裁切瞬間約需額外 17 KiB。
-- **實測建議**：完成部署、且 presence／env log 都已跑滿各自的保留視窗（至少一個月）後，應以裝置 REPL 執行 `os.statvfs('/')` 或呼叫 `GET /api/v1/device` 的 storage 欄位覆核實際剩餘空間，不要只依賴這裡的估算值；若明顯吃緊，`env_manager.DAILY_RETENTION_DAYS`（預設 366，比照 `presence_manager.DAILY_RETENTION_DAYS`）可調降以換取空間。
+- **實測建議**：完成部署後應以裝置 REPL 執行 `os.statvfs('/')` 或呼叫 `GET /api/v1/device` 的 `fs_free` 欄位覆核實際剩餘空間，不要只依賴這裡的估算值。7 天保留的原始/事件 log（`env_events.log`、`presence_events.log`）約一個月內就會穩定在保留視窗內的穩態大小；366 天保留的每日彙總 log（`env_daily.log`、`presence_daily.log`）要接近一整年才會長到穩態上限，短期量測看到的每日彙總檔案會比長期穩態小很多，不能用一個月的量測值直接外推。若空間明顯吃緊，`env_manager.DAILY_RETENTION_DAYS`（預設 366，比照 `presence_manager.DAILY_RETENTION_DAYS`）可調降以換取空間。
 - **`.py` 原始碼是目前最大宗的 flash 佔用來源**：一台已部署 presence／env 功能且圖片庫有內容的裝置，18 個 `.py` 檔案合計約 226 KB，佔裝置總佔用（307 KB）的 74%，遠超過圖片資產（~50KB）與 Web UI `.bin` 資產（~38KB）。`tools/pico_deploy/upload_cli.py --mpy` 可在部署前用 `mpy-cross` 把 `.py` 預編譯成 `.mpy` bytecode（`epaper.py`／`main.py`／`config.json` 除外，理由見 `CLAUDE.md`「部署至裝置」一節），是目前最有效的省空間手段。**實測**（2026-07-22，裝置 MicroPython 1.24.1）：18 個原始碼檔案從約 226 KB 壓到約 101 KB，裝置剩餘 flash 從 88.0 KiB 提升到 204.0 KiB（多出 116 KiB），比社群估計的 30–50% bytecode 縮減比例更好。**裝置剩餘空間吃緊時建議部署加上 `--mpy`**；這仍是 opt-in 選項而非預設行為——目前沒有部署前韌體版本檢查機制，`mpy-cross` 版號與裝置實際韌體版本漂移會讓 `.mpy` 模組 import 失敗，加上回滾（切回純 `.py`）流程尚未完整驗證，暫不建議設為預設。
 
 ## 圖片格式與相容性
