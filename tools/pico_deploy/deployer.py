@@ -48,6 +48,7 @@ class DeployOptions:
     include_webui: bool = True
     clean_mode: str = "none"
     reset_after: bool = True
+    compile_mpy: bool = False
 
     def __post_init__(self):
         if self.clean_mode not in ("none", "manifest", "recursive"):
@@ -68,6 +69,7 @@ class DeployEntry:
 class DeployPlan:
     source_root: Path
     entries: tuple[DeployEntry, ...]
+    staging_dir: Path | None = None
 
     @property
     def total_size(self) -> int:
@@ -123,14 +125,34 @@ def build_deploy_plan(options: DeployOptions) -> DeployPlan:
         raise DeploymentError(f"Project directory must contain src/: {project_root}")
 
     entries: list[DeployEntry] = []
+    staging_dir: Path | None = None
     if options.include_code:
+        if options.compile_mpy:
+            import tempfile
+
+            try:
+                from tools.pico_deploy import mpy_compiler
+            except ModuleNotFoundError:
+                # Support `python tools/pico_deploy/upload_cli.py` run directly from
+                # the repo root, where `tools` is not importable as a package.
+                import mpy_compiler
+            staging_dir = Path(tempfile.mkdtemp(prefix="pico_mpy_"))
+
         for path in sorted(source_dir.rglob("*")):
             if not path.is_file() or path.suffix.lower() not in (".py", ".json"):
                 continue
             if path.name == "config.json":
                 continue
             relative = path.relative_to(source_dir).as_posix()
-            entries.append(DeployEntry(path, relative, path.stat().st_size, "code"))
+            if options.compile_mpy and mpy_compiler.should_compile(path):
+                try:
+                    mpy_path = mpy_compiler.compile_to_mpy(path, staging_dir, relative)
+                except mpy_compiler.MpyCompileError as exc:
+                    raise DeploymentError(str(exc)) from exc
+                mpy_relative = relative[:-3] + ".mpy" if relative.endswith(".py") else relative + ".mpy"
+                entries.append(DeployEntry(mpy_path, mpy_relative, mpy_path.stat().st_size, "code"))
+            else:
+                entries.append(DeployEntry(path, relative, path.stat().st_size, "code"))
 
     if options.include_config:
         config_path = source_dir / "config.json"
@@ -144,7 +166,7 @@ def build_deploy_plan(options: DeployOptions) -> DeployPlan:
         _add_files(entries, source_dir, source_dir / "html", (".bin",), "webui")
 
     entries.sort(key=lambda entry: entry.remote_path)
-    return DeployPlan(project_root, tuple(entries))
+    return DeployPlan(project_root, tuple(entries), staging_dir)
 
 
 class MpremoteRunner:

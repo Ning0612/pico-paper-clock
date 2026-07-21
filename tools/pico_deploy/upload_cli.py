@@ -34,12 +34,13 @@ for _stream in (sys.stdout, sys.stderr):
 
 # --- Configuration ---
 SOURCE_DIR = "src"
-INCLUDE_EXTENSIONS = [".py", ".json"]
+INCLUDE_EXTENSIONS = [".py", ".json", ".mpy"]  # .mpy 一律列入，確保切換 --mpy 模式時舊檔會被清乾淨
 UPLOAD_IMAGES = True
 MPREMOTE_PORT = None
 ENABLE_CLEAN = True
 ENABLE_RECURSIVE_CLEAN = False  # 新增：是否遞迴清除所有檔案
 NO_CONFIG = False  # 新增：是否跳過 config.json
+COMPILE_MPY = False  # 新增：部署前用 mpy-cross 將 .py 預編譯為 .mpy
 
 
 def interactive_repl(base_cmd, retry_count=30, retry_delay=1.0, connected_exit_seconds=2.0):
@@ -387,8 +388,8 @@ def reset_device():
     base_cmd = get_mpremote_base()
     run_command(base_cmd + ["reset"], display_output=True)
 
-def upload_files():
-    options = DeployOptions(
+def build_upload_options():
+    return DeployOptions(
         source_root=_project_root(),
         include_code=True,
         include_config=not NO_CONFIG,
@@ -396,14 +397,20 @@ def upload_files():
         include_webui=True,
         clean_mode="none",
         reset_after=True,
+        compile_mpy=COMPILE_MPY,
     )
-    plan = build_deploy_plan(options)
+
+
+def upload_files(plan, options):
     print(f"📦 共 {len(plan.entries)} 個檔案要上傳，總大小: {format_bytes(plan.total_size)}")
     try:
         SerialDeployer(MpremoteRunner(MPREMOTE_PORT)).deploy(plan, options, log=print)
     except Exception as exc:
         print(f"❌ 上傳失敗：{exc}")
         return False
+    finally:
+        if plan.staging_dir is not None:
+            shutil.rmtree(plan.staging_dir, ignore_errors=True)
 
     # Keep the historical CLI behavior: enter REPL after a successful reset.
     base_cmd = get_mpremote_base()
@@ -418,10 +425,12 @@ def parse_args(argv=None):
     parser.add_argument("--recursive-clean", action="store_true", dest="recursive_clean", default=False, help="遞迴清除裝置上的所有檔案 (包含目錄)")
     parser.add_argument("--no-clean", action="store_false", dest="enable_clean", default=True, help="跳過清除檔案步驟")
     parser.add_argument("--no-config", action="store_true", dest="no_config", default=False, help="不要上傳也不要刪除 config.json")
+    parser.add_argument("--mpy", action="store_true", dest="compile_mpy", default=False,
+                        help="部署前用 mpy-cross 將 .py 預編譯為 .mpy 以節省裝置 flash（epaper.py／main.py／config.json 除外，需 pip install mpy-cross==1.24.1.post3）")
     return parser.parse_args(argv)
 
 def main(argv=None):
-    global UPLOAD_IMAGES, ENABLE_RECURSIVE_CLEAN, ENABLE_CLEAN, NO_CONFIG, MPREMOTE_PORT
+    global UPLOAD_IMAGES, ENABLE_RECURSIVE_CLEAN, ENABLE_CLEAN, NO_CONFIG, MPREMOTE_PORT, COMPILE_MPY
     args = parse_args(argv)
 
     UPLOAD_IMAGES = args.upload_images
@@ -429,13 +438,23 @@ def main(argv=None):
     ENABLE_CLEAN = args.enable_clean
     NO_CONFIG = args.no_config
     MPREMOTE_PORT = args.port
+    COMPILE_MPY = args.compile_mpy
 
     print("--- Pico W 自動部署開始 ---")
+
+    # 先建好部署 plan（含 --mpy 編譯）再清除裝置，避免編譯失敗時裝置已經
+    # 被清空卻還沒上傳成功、卡在檔案不全的狀態。
+    options = build_upload_options()
+    try:
+        plan = build_deploy_plan(options)
+    except Exception as exc:
+        print(f"❌ 建立部署清單失敗：{exc}")
+        return 1
 
     if ENABLE_CLEAN:
         clean_device()
 
-    if not upload_files():
+    if not upload_files(plan, options):
         return 1
     return 0
 

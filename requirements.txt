@@ -1,3 +1,6 @@
 mpremote
 pyserial
 Pillow
+# 對應裝置韌體 MicroPython 1.24.1（mpy v6.3）；PyPI 沒有裸的 1.24.1，只有 .post2/.post3 重新打包，
+# 兩者 bytecode 版本相同，用 .post3 是最新的重新打包版本。僅 upload_cli.py --mpy 需要，裝置本身不需要。
+mpy-cross==1.24.1.post3

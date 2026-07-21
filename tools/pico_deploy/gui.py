@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import re
 import queue
+import shutil
 import threading
 import time
 import tkinter as tk
@@ -171,6 +172,7 @@ class PicoDeployTool(tk.Tk):
             "config": tk.BooleanVar(value=False),
             "images": tk.BooleanVar(value=True),
             "webui": tk.BooleanVar(value=True),
+            "mpy": tk.BooleanVar(value=False),
             "clean": tk.BooleanVar(value=False),
             "recursive": tk.BooleanVar(value=False),
             "reset": tk.BooleanVar(value=True),
@@ -179,6 +181,7 @@ class PicoDeployTool(tk.Tk):
         ttk.Checkbutton(controls, text="覆寫 config.json（危險）", variable=self.deploy_vars["config"]).pack(anchor="w")
         ttk.Checkbutton(controls, text="裝置圖片（PPC1 .bin）", variable=self.deploy_vars["images"]).pack(anchor="w")
         ttk.Checkbutton(controls, text="生成 WebUI .bin", variable=self.deploy_vars["webui"]).pack(anchor="w")
+        ttk.Checkbutton(controls, text="預編譯 .mpy（省 flash，epaper.py／main.py 除外）", variable=self.deploy_vars["mpy"]).pack(anchor="w")
         ttk.Separator(controls).pack(fill="x", pady=8)
         ttk.Checkbutton(controls, text="清理本次 manifest 舊檔", variable=self.deploy_vars["clean"]).pack(anchor="w")
         ttk.Checkbutton(controls, text="遞迴清理整台裝置（需 config）", variable=self.deploy_vars["recursive"]).pack(anchor="w")
@@ -463,6 +466,7 @@ class PicoDeployTool(tk.Tk):
             include_webui=self.deploy_vars["webui"].get(),
             clean_mode=clean_mode,
             reset_after=self.deploy_vars["reset"].get(),
+            compile_mpy=self.deploy_vars["mpy"].get(),
         )
 
     def _plan_from_ui(self) -> tuple[DeployPlan, DeployOptions]:
@@ -556,13 +560,17 @@ class PicoDeployTool(tk.Tk):
     def _serial_action(self, plan: DeployPlan, options: DeployOptions, port):
         def action(token: CancellationToken, log):
             deployer = SerialDeployer(MpremoteRunner(port=port))
-            deployer.deploy(
-                plan,
-                options,
-                cancellation=token,
-                progress=self._deployment_progress,
-                log=log,
-            )
+            try:
+                deployer.deploy(
+                    plan,
+                    options,
+                    cancellation=token,
+                    progress=self._deployment_progress,
+                    log=log,
+                )
+            finally:
+                if plan.staging_dir is not None:
+                    shutil.rmtree(plan.staging_dir, ignore_errors=True)
 
         return action
 
