@@ -109,26 +109,88 @@ class PresenceMemoryTests(unittest.TestCase):
             self.module.PENDING_SESSION_FILE = original_session_pending
 
     def test_daily_retention_covers_year_heatmap_without_extending_events(self):
-        manager = self.module.PresenceManager(
-            discord_sender=lambda _summary: None,
-            session_sender=lambda *_args: None,
-        )
-        calls = []
-        original_trim = self.module._trim_by_date
-        original_mktime = self.module.time.mktime
-        self.module._trim_by_date = lambda path, date: calls.append((path, date))
-        self.module.time.mktime = lambda value: original_mktime(tuple(value) + (0,))
+        original_paths = {
+            name: getattr(self.module, name)
+            for name in ("PENDING_FILE", "PENDING_SESSION_FILE")
+        }
         try:
-            manager._trim_retention("20260714")
-        finally:
-            self.module._trim_by_date = original_trim
-            self.module.time.mktime = original_mktime
+            with tempfile.TemporaryDirectory() as directory:
+                self.module.PENDING_FILE = str(Path(directory) / "summary.log")
+                self.module.PENDING_SESSION_FILE = str(Path(directory) / "session.log")
 
-        self.assertEqual([path for path, _date in calls], [
-            self.module.EVENT_FILE,
-            self.module.DAILY_FILE,
-        ])
-        self.assertLess(calls[1][1], calls[0][1])
+                manager = self.module.PresenceManager(
+                    discord_sender=lambda _summary: None,
+                    session_sender=lambda *_args: None,
+                )
+                calls = []
+                original_trim = self.module._trim_by_date
+                original_mktime = self.module.time.mktime
+                self.module._trim_by_date = lambda path, date: calls.append((path, date))
+                self.module.time.mktime = lambda value: original_mktime(tuple(value) + (0,))
+                try:
+                    manager._trim_retention("20260714")
+                finally:
+                    self.module._trim_by_date = original_trim
+                    self.module.time.mktime = original_mktime
+
+                self.assertEqual([path for path, _date in calls], [
+                    self.module.EVENT_FILE,
+                    self.module.DAILY_FILE,
+                    self.module.PENDING_FILE,
+                    self.module.PENDING_SESSION_FILE,
+                ])
+                self.assertLess(calls[1][1], calls[0][1])
+                self.assertGreater(calls[2][1], calls[0][1])
+                self.assertEqual(calls[2][1], calls[3][1])
+        finally:
+            for name, value in original_paths.items():
+                setattr(self.module, name, value)
+
+    def test_pending_retention_drops_stale_notifications_and_refreshes_head(self):
+        original_paths = {
+            name: getattr(self.module, name)
+            for name in ("EVENT_FILE", "DAILY_FILE", "PENDING_FILE", "PENDING_SESSION_FILE")
+        }
+        original_mktime = self.module.time.mktime
+        try:
+            with tempfile.TemporaryDirectory() as directory:
+                root = Path(directory)
+                self.module.EVENT_FILE = str(root / "events.log")
+                self.module.DAILY_FILE = str(root / "daily.log")
+                self.module.PENDING_FILE = str(root / "summary.log")
+                self.module.PENDING_SESSION_FILE = str(root / "session.log")
+                Path(self.module.PENDING_FILE).write_text(
+                    "20260601,1,1,1,1\n20260714,1,1,1,1\n", encoding="utf-8"
+                )
+                Path(self.module.PENDING_SESSION_FILE).write_text(
+                    "20260601,090000,20260601,090100,60\n"
+                    "20260714,090000,20260714,090100,60\n",
+                    encoding="utf-8",
+                )
+                self.module.time.mktime = lambda value: original_mktime(tuple(value) + (0,))
+
+                manager = self.module.PresenceManager(
+                    discord_sender=lambda _summary: None,
+                    session_sender=lambda *_args: None,
+                )
+                manager._trim_retention("20260714")
+
+                self.assertEqual(
+                    Path(self.module.PENDING_FILE).read_text(encoding="utf-8").splitlines(),
+                    ["20260714,1,1,1,1"],
+                )
+                self.assertEqual(
+                    Path(self.module.PENDING_SESSION_FILE).read_text(encoding="utf-8").splitlines(),
+                    ["20260714,090000,20260714,090100,60"],
+                )
+                self.assertEqual(manager.pending_summary, "20260714,1,1,1,1")
+                self.assertEqual(
+                    manager.pending_session, "20260714,090000,20260714,090100,60"
+                )
+        finally:
+            self.module.time.mktime = original_mktime
+            for name, value in original_paths.items():
+                setattr(self.module, name, value)
 
     def test_status_exposes_device_current_date_for_web_clients(self):
         manager = self.module.PresenceManager(

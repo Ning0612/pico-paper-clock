@@ -11,6 +11,7 @@ PENDING_FILE = "presence_pending.log"
 PENDING_SESSION_FILE = "presence_session_pending.log"
 RETENTION_DAYS = 30
 DAILY_RETENTION_DAYS = 366
+PENDING_RETENTION_DAYS = 7
 DISCORD_FLUSH_INTERVAL_MS = 60 * 1000
 MAX_EVENT_LINES_IN_MEMORY = 128
 MAX_DAILY_LINES_IN_MEMORY = 366
@@ -771,9 +772,16 @@ class PresenceManager:
                 int(current_date[6:8]),
                 0, 0, 0, 0, 0
             )
-            event_min_epoch = time.mktime(current_tuple) - (RETENTION_DAYS - 1) * 86400
-            daily_min_epoch = time.mktime(current_tuple) - (DAILY_RETENTION_DAYS - 1) * 86400
+            current_epoch = time.mktime(current_tuple)
+            event_min_epoch = current_epoch - (RETENTION_DAYS - 1) * 86400
+            daily_min_epoch = current_epoch - (DAILY_RETENTION_DAYS - 1) * 86400
+            pending_min_epoch = current_epoch - (PENDING_RETENTION_DAYS - 1) * 86400
             _trim_by_date(EVENT_FILE, _date_key(time.localtime(event_min_epoch)))
             _trim_by_date(DAILY_FILE, _date_key(time.localtime(daily_min_epoch)))
+            pending_min_date = _date_key(time.localtime(pending_min_epoch))
+            _trim_by_date(PENDING_FILE, pending_min_date)
+            _trim_by_date(PENDING_SESSION_FILE, pending_min_date)
+            self.pending_summary = _read_first_line(PENDING_FILE)
+            self.pending_session = _read_first_line(PENDING_SESSION_FILE)
         except Exception as e:
             print("Presence: retention trim failed. {}".format(e))
