@@ -10,6 +10,7 @@
 - [設定指南](CONFIG_GUIDE.md) — schema v3、多設定檔、範圍與交易式保存。
 - [圖片資產與轉換](IMAGE_GUIDE.md) — 資產目錄、尺寸、事件命名與 GUI/CLI。
 - [圖片 API](IMAGE_API.md) — 裝置圖片列表、上傳、預覽、刪除與認證契約。
+- [環境紀錄 API](ENV_LOG_API.md) — 溫濕度歷史記錄的取樣頻率、保留策略與 `/api/env/*` 契約。
 - [Release assets](RELEASE_ASSETS.md) — GitHub Release 的 UF2、CAD 檔案與發布檢查表。
 
 ## 來源與生成物

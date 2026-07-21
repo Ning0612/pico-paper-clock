@@ -22,6 +22,7 @@ class AppControllerDateChangeTests(unittest.TestCase):
                 "chime",
                 "discord_notifier",
                 "presence_manager",
+                "env_manager",
             )
         }
         cls.sync_calls = []
@@ -82,6 +83,13 @@ class AppControllerDateChangeTests(unittest.TestCase):
         presence_module.PresenceManager = type("PresenceManager", (), {})
         presence_module.set_presence_manager = lambda *_args: None
         sys.modules["presence_manager"] = presence_module
+
+        env_module = types.ModuleType("env_manager")
+        env_module.EnvManager = type(
+            "EnvManager", (), {"__init__": lambda self, *_a, **_kw: None, "update": lambda self, *_a, **_kw: None}
+        )
+        env_module.set_env_manager = lambda *_args: None
+        sys.modules["env_manager"] = env_module
 
         source = Path(__file__).resolve().parents[1] / "src" / "app_controller.py"
         spec = importlib.util.spec_from_file_location("app_controller_test_target", source)
@@ -207,6 +215,7 @@ class AppControllerDateChangeTests(unittest.TestCase):
         controller.hw = hardware
         controller.lan_server = None
         controller.presence = FakePresence()
+        controller.env = types.SimpleNamespace(update=lambda *_args, **_kwargs: None)
         controller.time_zone_offset = 8
         controller._send_startup_discord_if_ready = lambda: False
         controller._startup_discord_pending = lambda: False

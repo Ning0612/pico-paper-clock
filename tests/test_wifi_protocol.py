@@ -326,6 +326,46 @@ class WifiProtocolTests(unittest.TestCase):
             self.module.get_presence_manager = original_manager
             self.module.iter_lines = original_iter_lines
 
+    def test_env_stream_skips_malformed_lines(self):
+        original_manager = self.module.get_env_manager
+        original_iter_lines = self.module.iter_lines
+        try:
+            self.module.get_env_manager = lambda: object()
+            self.module.iter_lines = lambda _path: iter((
+                "malformed-sample",
+                "20260714,1415,25.4,58.0",
+            ))
+            client = FakeClient()
+            self.module._send_env_lines(client, "samples")
+            response = bytes(client.sent)
+            self.assertIn(b"200 OK", response)
+            self.assertIn(b'"d":"20260714"', response)
+            self.assertIn(b'"t":25.4', response)
+            self.assertIn(b'"h":58.0', response)
+            self.assertTrue(response.endswith(b"]"))
+        finally:
+            self.module.get_env_manager = original_manager
+            self.module.iter_lines = original_iter_lines
+
+    def test_env_daily_stream_reports_min_max_avg(self):
+        original_manager = self.module.get_env_manager
+        original_iter_lines = self.module.iter_lines
+        try:
+            self.module.get_env_manager = lambda: object()
+            self.module.iter_lines = lambda _path: iter((
+                "too,few,fields",
+                "20260714,22.1,29.8,25.6,45.0,61.0,53.2,96",
+            ))
+            client = FakeClient()
+            self.module._send_env_lines(client, "daily")
+            response = bytes(client.sent)
+            self.assertIn(b'"tmin":22.1', response)
+            self.assertIn(b'"havg":53.2', response)
+            self.assertIn(b'"n":96', response)
+        finally:
+            self.module.get_env_manager = original_manager
+            self.module.iter_lines = original_iter_lines
+
     def test_desk_sessions_are_derived_without_adc_debug_fields(self):
         original_manager = self.module.get_presence_manager
         original_iter_lines = self.module.iter_lines

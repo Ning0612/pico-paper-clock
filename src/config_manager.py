@@ -62,6 +62,10 @@ class ConfigManager:
                 },
                 "weather_api_key": "",
                 "discord_webhook_url": "",
+                "env_log": {
+                    "enabled": True,
+                    "interval_min": 15
+                },
                 "setup_complete": False,
                 "lan_admin": {
                     "username": "admin",

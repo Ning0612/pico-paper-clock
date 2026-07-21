@@ -63,6 +63,8 @@ OpenWeatherMap API 金鑰（所有設定檔共用同一個 API Key）
 | 欄位 | 用途 | 注意事項 |
 |---|---|---|
 | `global.discord_webhook_url` | 選用的 Discord 在席通知 webhook | 視為 secret；留空可停用通知 |
+| `global.env_log.enabled` | 是否記錄溫濕度歷史（DHT22） | 預設 `true`；目前僅能透過 `config.json` 調整，Web UI 尚未提供切換開關 |
+| `global.env_log.interval_min` | 溫濕度原始取樣間隔（分鐘） | 預設 `15`；目前僅能透過 `config.json` 調整，Web UI 尚未提供輸入欄位 |
 | `global.setup_complete` | 是否已完成首次 Wi-Fi 設定；裝置也會依既有 profile 自動補正 | 一般不要手動修改 |
 | `global.lan_admin.username` | WebUI session 固定登入帳號 | 固定為 `admin`；保留此欄位作舊設定相容性 |
 | `global.lan_admin.password` | PBKDF2-HMAC-SHA256 密碼記錄，不是明文密碼 | 不要提交真實密碼或雜湊記錄 |

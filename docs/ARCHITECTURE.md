@@ -45,6 +45,15 @@ main.py
 
 這些策略的目標是降低「單次配置峰值」與重複配置頻率，而不是宣稱裝置 heap 永遠不會耗盡。現場診斷應同時查看 serial 的 `ENOMEM`、`Memory before/after ...` telemetry、DHT22 錯誤與 `/api/v1/device` 的 `heap_free`。
 
+## Flash 儲存邊界
+
+`presence_manager.py` 與 `env_manager.py` 的 log 檔案都存在裝置的內部 flash 檔案系統上，與韌體、`config.json`、`src/image/` 圖片資產共用同一個有限空間（在一台已使用一段時間、圖片庫已有內容的裝置上，剩餘可用空間可能只有約 100 KiB 等級）：
+
+- 兩個模組都採「事件/樣本檔＋每日彙總檔」的雙檔設計，並在每日換日時以 `_trim_by_date` 依日期視窗裁切——檔案大小會在保留視窗內收斂到穩定值，不會隨時間無限增長。
+- `env_events.log`（15 分鐘取樣、7 天保留）穩態約 17 KiB；`env_daily.log`（每日彙總、366 天保留）穩態約 15 KiB；新增的 `environment.bin` WebUI 資產約 6.7 KiB（實測，`tools/build_html.py` 輸出）。三者合計約 40 KiB 是這次新增功能的穩態 flash 佔用。
+- 裁切/換日時的 `.tmp`/`.bak` 交易寫入（`_commit_tmp`）會暫時需要被重寫檔案的一整份額外空間；`env_events.log` 裁切瞬間約需額外 17 KiB。
+- **實測建議**：完成部署、且 presence／env log 都已跑滿各自的保留視窗（至少一個月）後，應以裝置 REPL 執行 `os.statvfs('/')` 或呼叫 `GET /api/v1/device` 的 storage 欄位覆核實際剩餘空間，不要只依賴這裡的估算值；若明顯吃緊，`env_manager.DAILY_RETENTION_DAYS`（預設 366，比照 `presence_manager.DAILY_RETENTION_DAYS`）可調降以換取空間。
+
 ## 圖片格式與相容性
 
 - raw 圖片 payload 的 canonical 格式是 `MONO_HLSB`，每個 byte 的 bit 0 是最左像素；新工具一律寫入帶 HLSB header 的 PPC1 `.bin`。

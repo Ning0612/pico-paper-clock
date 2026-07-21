@@ -43,6 +43,11 @@ def get_presence_manager():
     return _get_presence_manager()
 
 
+def get_env_manager():
+    from env_manager import get_env_manager as _get_env_manager
+    return _get_env_manager()
+
+
 def iter_lines(path):
     from presence_manager import iter_lines as _iter_lines
     return _iter_lines(path)
@@ -1038,6 +1043,60 @@ def _send_presence_sessions(cl):
 def _send_presence_dashboard(cl):
     _send_html_file(cl, '/html/dashboard.bin')
 
+
+def _env_epoch(date_value, hhmm_value):
+    try:
+        return int(time.mktime((
+            int(date_value[0:4]),
+            int(date_value[4:6]),
+            int(date_value[6:8]),
+            int(hhmm_value[0:2]),
+            int(hhmm_value[2:4]),
+            0, 0, 0
+        )))
+    except Exception:
+        return 0
+
+
+def _send_env_lines(cl, kind):
+    manager = get_env_manager()
+    response_buffer = bytearray(b"HTTP/1.0 200 OK\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n[")
+    if manager:
+        path = "env_daily.log" if kind == "daily" else "env_events.log"
+        first = True
+        for line in iter_lines(path):
+            try:
+                parts = line.split(",")
+                if kind == "daily" and len(parts) >= 8:
+                    item = '{{"d":"{}","tmin":{},"tmax":{},"tavg":{},"hmin":{},"hmax":{},"havg":{},"n":{}}}'.format(
+                        parts[0], float(parts[1]), float(parts[2]), float(parts[3]),
+                        float(parts[4]), float(parts[5]), float(parts[6]), int(parts[7])
+                    )
+                elif kind == "samples" and len(parts) >= 4:
+                    item = '{{"d":"{}","tm":"{}","t":{},"h":{},"e":{}}}'.format(
+                        parts[0], parts[1], float(parts[2]), float(parts[3]), _env_epoch(parts[0], parts[1])
+                    )
+                else:
+                    continue
+            except (ValueError, TypeError, IndexError):
+                print("Warning: Skipping malformed env {} line.".format(kind))
+                continue
+            if not first:
+                response_buffer.extend(b",")
+            response_buffer.extend(item.encode())
+            if len(response_buffer) >= 512:
+                send_chunk(cl, response_buffer)
+                response_buffer = bytearray()
+            first = False
+    response_buffer.extend(b"]")
+    if response_buffer:
+        send_chunk(cl, response_buffer)
+
+
+def _send_env_dashboard(cl):
+    _send_html_file(cl, '/html/environment.bin')
+
+
 def _save_settings_from_params(params):
     original_name = params.get("original_profile_name", "")
     new_name = params.get("profile_name", "")
@@ -1203,6 +1262,28 @@ def handle_config_request(cl, request, require_auth=False, client_key="unknown")
 
     if method == "GET" and path == "/api/desk/sessions":
         _send_presence_sessions(cl)
+        cl.close()
+        return
+
+    if method == "GET" and path == "/environment":
+        _send_env_dashboard(cl)
+        cl.close()
+        return
+
+    if method == "GET" and path == "/api/env/status":
+        manager = get_env_manager()
+        status = manager.get_status() if manager else {"temp": None, "hum": None, "current_date": "", "t_min": None, "t_max": None, "t_avg": None, "h_min": None, "h_max": None, "h_avg": None, "count": 0, "now_epoch": 0}
+        _send_json(cl, status)
+        cl.close()
+        return
+
+    if method == "GET" and path == "/api/env/samples":
+        _send_env_lines(cl, "samples")
+        cl.close()
+        return
+
+    if method == "GET" and path == "/api/env/daily":
+        _send_env_lines(cl, "daily")
         cl.close()
         return
 

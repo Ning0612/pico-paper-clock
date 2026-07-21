@@ -11,6 +11,7 @@ from wifi_manager import reset_wifi_and_reboot
 from chime import Chime
 from discord_notifier import send_lan_ip, send_presence_session, send_presence_summary
 from presence_manager import PresenceManager, set_presence_manager
+from env_manager import EnvManager, set_env_manager
 
 STARTUP_DISCORD_DELAY_MS = 45 * 1000
 STARTUP_DISCORD_RETRY_MS = 30 * 1000
@@ -27,7 +28,7 @@ class AppController:
         "state", "hw", "lan_server", "lan_ip", "startup_discord_sent",
         "startup_discord_disabled", "startup_discord_attempted", "startup_discord_ready_ms",
         "startup_discord_last_attempt_ms", "chime", "location", "api_key",
-        "time_zone_offset", "presence",
+        "time_zone_offset", "presence", "env",
     )
 
     def __init__(self, state, hardware, lan_server=None, lan_ip=None):
@@ -59,6 +60,10 @@ class AppController:
         # low-memory window.
         self.presence.last_retry_ms = time.ticks_ms()
         set_presence_manager(self.presence)
+        self.env = EnvManager(
+            sample_interval_min=config_manager.get_global("env_log.interval_min", 15)
+        )
+        set_env_manager(self.env)
 
 
     def handle_touch(self, touch_state):
@@ -118,6 +123,12 @@ class AppController:
             clear_display_and_sleep()
             self.state.is_first_run = True
             self.state.partial_update = False
+
+        # Sample independently of presence/display state so room temperature
+        # keeps being logged while the user is away from the desk.
+        if config_manager.get_global("env_log.enabled", True):
+            self.env.update(t, self.hw)
+
         # Drive the display from the debounced presence state so both transitions
         # honor their configured timeout instead of reacting to raw ADC changes.
         if self.presence.current_state is True:
