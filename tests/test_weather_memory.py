@@ -97,6 +97,47 @@ class WeatherApiTests(unittest.TestCase):
         finally:
             self.module._make_request_with_retry = original_request
 
+    def test_weather_bundle_uses_one_request_for_current_and_forecast(self):
+        class Response:
+            status_code = 200
+
+            def json(self):
+                return {
+                    "current": {"temperature_2m": 30.5, "weather_code": 2},
+                    "daily": {
+                        "time": [
+                            "2026-07-17", "2026-07-18", "2026-07-19",
+                            "2026-07-20", "2026-07-21",
+                        ],
+                        "weather_code": [0, 3, 61, 45, 95],
+                        "temperature_2m_mean": [30, 31, 29, 28, 27],
+                        "precipitation_probability_max": [0, 20, 80, 40, 70],
+                    },
+                }
+
+            def close(self):
+                pass
+
+        original_request = self.module._make_request_with_retry
+        requested_urls = []
+        try:
+            self.module._make_request_with_retry = lambda url: requested_urls.append(url) or Response()
+
+            result = self.module.fetch_weather_bundle(24.6855, 120.8789, days_limit=5)
+
+            self.assertEqual(result[0], (30.5, "Clouds"))
+            self.assertEqual(len(result[1]), 5)
+            self.assertEqual(len(requested_urls), 1)
+            self.assertIn("current=temperature_2m,weather_code", requested_urls[0])
+            self.assertIn(
+                "daily=weather_code,temperature_2m_mean,precipitation_probability_max",
+                requested_urls[0],
+            )
+            self.assertIn("forecast_days=5", requested_urls[0])
+            self.assertIn("timezone=Etc/GMT-8", requested_urls[0])
+        finally:
+            self.module._make_request_with_retry = original_request
+
     def test_forecast_rejects_missing_precipitation_probability(self):
         data = {
             "daily": {

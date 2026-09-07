@@ -101,10 +101,20 @@ def _release_display_workspace_before_discord():
         pass
 
 
+def _discord_configured():
+    try:
+        return bool(config_manager.get_global("discord_webhook_url", ""))
+    except Exception:
+        return False
+
+
 # The notifier is imported lazily on purpose: it pulls in network/socket/ssl,
-# which only exist on the device.  A failed import must never block a flush.
+# which only exist on the device.  Do not even import it when the user has not
+# configured a webhook; pending records can remain on flash until one exists.
 def _tls_headroom_ok():
     """False only when the notifier positively reports too little contiguous heap."""
+    if not _discord_configured():
+        return True
     try:
         from discord_notifier import has_tls_headroom
     except Exception:
@@ -116,6 +126,8 @@ def _tls_headroom_ok():
 
 
 def _largest_block():
+    if not _discord_configured():
+        return -1
     try:
         from discord_notifier import largest_contiguous_block
         return largest_contiguous_block()
@@ -125,6 +137,8 @@ def _largest_block():
 
 def _delivery_blocked():
     """Non-empty when sending is impossible regardless of available memory."""
+    if not _discord_configured():
+        return "nowebhook"
     try:
         from discord_notifier import delivery_blocked
     except Exception:
@@ -140,6 +154,8 @@ def _is_memory_failure(reason):
 
 
 def _last_failure_reason():
+    if not _discord_configured():
+        return "nowebhook"
     try:
         from discord_notifier import last_failure
         return last_failure() or "unknown"
@@ -148,6 +164,8 @@ def _last_failure_reason():
 
 
 def _diag(event, detail=""):
+    if not _discord_configured():
+        return
     try:
         from discord_notifier import diag_record
         diag_record(event, detail)
@@ -695,6 +713,8 @@ class PresenceManager:
         return False
 
     def flush_discord(self):
+        if not _discord_configured():
+            return False
         if self.discord_disabled:
             if time.ticks_diff(time.ticks_ms(), self.last_retry_ms) >= DISCORD_FLUSH_INTERVAL_MS:
                 self.discord_disabled = False
@@ -775,6 +795,8 @@ class PresenceManager:
 
     def flush_startup_discord(self, max_messages=8):
         """Flush pending notifications before display and sensor objects load."""
+        if not _discord_configured():
+            return 0
         sent_count = 0
         while sent_count < max_messages:
             if self.pending_session:

@@ -23,8 +23,13 @@ class PresenceMemoryTests(unittest.TestCase):
 
         config_module = types.ModuleType("config_manager")
         config_module.config_manager = types.SimpleNamespace(
-            get=lambda _key, default=None: default
+            get=lambda _key, default=None: default,
+            get_global=lambda key, default=None: (
+                "https://discord.com/api/webhooks/test/test"
+                if key == "discord_webhook_url" else default
+            ),
         )
+        cls.config_manager = config_module.config_manager
         sys.modules["config_manager"] = config_module
 
         source = Path(__file__).resolve().parents[1] / "src" / "presence_manager.py"
@@ -358,6 +363,18 @@ class PresenceMemoryTests(unittest.TestCase):
     def test_delivery_precondition_defaults_to_attempting_the_send(self):
         """If the probe cannot run it must never be the reason nothing is sent."""
         self.assertEqual(self.module._delivery_blocked(), "")
+
+    def test_missing_webhook_does_not_import_notifier(self):
+        original_get_global = self.config_manager.get_global
+        original_notifier = sys.modules.pop("discord_notifier", None)
+        try:
+            self.config_manager.get_global = lambda _key, default=None: default
+            self.assertEqual(self.module._delivery_blocked(), "nowebhook")
+            self.assertNotIn("discord_notifier", sys.modules)
+        finally:
+            self.config_manager.get_global = original_get_global
+            if original_notifier is not None:
+                sys.modules["discord_notifier"] = original_notifier
 
     def test_headroom_probe_defaults_to_allowing_the_send(self):
         """A probe that cannot run must never be the reason a message is blocked."""

@@ -3,13 +3,12 @@ import time
 import gc
 from config_manager import config_manager
 from netutils import sync_time, get_local_time
-from weather import fetch_current_weather, fetch_weather_forecast
+from weather import fetch_weather_bundle
 from display_manager import update_page_weather, update_page_time_image, update_page_birthday, update_page_image_preview
 from display_utils import clear_display_and_sleep, release_display_workspace
 from image_manager import image_catalog, image_store
 from wifi_manager import reset_wifi_and_reboot
 from chime import Chime
-from discord_notifier import send_lan_ip, send_presence_session, send_presence_summary
 from presence_manager import PresenceManager, set_presence_manager
 from env_manager import EnvManager, set_env_manager
 
@@ -62,8 +61,34 @@ CURRENT_WEATHER_REFRESH_MS = 3 * 60 * 1000
 CURRENT_WEATHER_RETRY_MS = 10 * 60 * 1000
 FORECAST_REFRESH_MS = 30 * 60 * 1000
 FORECAST_RETRY_MS = 10 * 60 * 1000
-CURRENT_WEATHER_MAX_AGE_MS = 30 * 60 * 1000
-FORECAST_MAX_AGE_MS = 4 * 60 * 60 * 1000
+
+
+def _discord_configured():
+    try:
+        return bool(config_manager.get_global("discord_webhook_url", ""))
+    except Exception:
+        return False
+
+
+def _send_lan_ip(ip_address):
+    if not _discord_configured():
+        return False
+    from discord_notifier import send_lan_ip
+    return send_lan_ip(ip_address)
+
+
+def _send_presence_session(start_date, start_time, end_date, end_time, duration_seconds):
+    if not _discord_configured():
+        return False
+    from discord_notifier import send_presence_session
+    return send_presence_session(start_date, start_time, end_date, end_time, duration_seconds)
+
+
+def _send_presence_summary(summary_line):
+    if not _discord_configured():
+        return False
+    from discord_notifier import send_presence_summary
+    return send_presence_summary(summary_line)
 
 class AppController:
     """Manages the application's main logic, including hardware interaction, display updates, and data fetching."""
@@ -97,8 +122,8 @@ class AppController:
         self.weather_longitude = config_manager.get("weather.longitude")
         self.time_zone_offset = config_manager.get("user.timezone_offset", 8)
         self.presence = PresenceManager(
-            discord_sender=send_presence_summary,
-            session_sender=send_presence_session
+            discord_sender=_send_presence_summary,
+            session_sender=_send_presence_session
         )
         # Let the display, sensor, and server objects settle before the first
         # pending Discord retry; the startup webhook already used the safe
@@ -356,6 +381,8 @@ class AppController:
 
     def _check_discord_stall(self):
         """Reboots when Discord is wedged by heap fragmentation and nothing else."""
+        if not _discord_configured():
+            return
         # Latch on every loop, never only when a stall is already detected: after
         # ~6.2 days ticks_diff() stops being meaningful, and the fragmentation this
         # guards against typically appears later than that.
@@ -424,13 +451,14 @@ class AppController:
         machine.reset()
 
     def _handle_date_change(self, current_day):
-        """Invalidate daily weather data and permit an immediate refresh."""
+        """Refresh daily weather while retaining the last-known-good payload."""
         if current_day == self.state.last_day:
             return False
 
         self.state.last_day = current_day
-        self.state.weather_forecast = None
-        self.state.current_weather = None
+        # Keep the existing payload visible if the first request of the new day
+        # fails.  Reset timestamps to force an immediate bundle refresh without
+        # turning a transient network/TLS failure into an empty weather page.
         self.state.weather_forecast_last_updated = -1
         self.state.weather_forecast_last_attempted = -1
         self.state.current_weather_last_updated = -1
@@ -441,7 +469,7 @@ class AppController:
     def _send_startup_discord_if_ready(self):
         if self.startup_discord_sent or self.startup_discord_disabled or not self.lan_ip:
             return False
-        if not config_manager.get_global("discord_webhook_url", ""):
+        if not _discord_configured():
             self.startup_discord_disabled = True
             return False
         if time.ticks_diff(time.ticks_ms(), self.startup_discord_ready_ms) < 0:
@@ -452,7 +480,7 @@ class AppController:
         self.startup_discord_last_attempt_ms = time.ticks_ms()
         self.startup_discord_attempted = True
         release_display_workspace()
-        result = send_lan_ip(self.lan_ip)
+        result = _send_lan_ip(self.lan_ip)
         if result is None:
             print("Warning: Discord LAN IP notification hit ENOMEM; will retry later.")
         else:
@@ -468,7 +496,7 @@ class AppController:
             not self.startup_discord_attempted and
             not self.startup_discord_sent and
             not self.startup_discord_disabled and
-            bool(config_manager.get_global("discord_webhook_url", ""))
+            _discord_configured()
         )
 
     def _update_display(self, t):
@@ -527,9 +555,8 @@ class AppController:
 
     def _update_weather(self):
         """Fetches and updates current weather and forecast data if needed."""
+        used_network = False
         try:
-            used_network = False
-            weather_workspace_released = False
             now_ms = time.ticks_ms()
 
             current_attempt_allowed = (
@@ -538,60 +565,51 @@ class AppController:
             )
             current_due = current_attempt_allowed and (
                 not self.state.current_weather or
+                self.state.current_weather_last_updated < 0 or
                 time.ticks_diff(now_ms, self.state.current_weather_last_updated) > CURRENT_WEATHER_REFRESH_MS
             )
             if self.state.is_first_run and self.state.current_weather_last_attempted < 0:
                 current_due = True
 
-            if current_due:
-                used_network = True
-                self.state.current_weather_last_attempted = now_ms
-                release_display_workspace()
-                gc.collect()
-                weather_workspace_released = True
-                current_weather = fetch_current_weather(
-                    self.weather_latitude, self.weather_longitude, self.time_zone_offset
-                )
-                if current_weather:
-                    self.state.current_weather = current_weather
-                    self.state.current_weather_last_updated = time.ticks_ms()
-
-            now_ms = time.ticks_ms()
             forecast_attempt_allowed = (
                 self.state.weather_forecast_last_attempted < 0 or
                 time.ticks_diff(now_ms, self.state.weather_forecast_last_attempted) > FORECAST_RETRY_MS
             )
             forecast_due = forecast_attempt_allowed and (
                 not self.state.weather_forecast or
+                self.state.weather_forecast_last_updated < 0 or
                 time.ticks_diff(now_ms, self.state.weather_forecast_last_updated) > FORECAST_REFRESH_MS
             )
             if self.state.is_first_run and self.state.weather_forecast_last_attempted < 0:
                 forecast_due = True
 
-            if forecast_due:
+            # Always request current conditions and the forecast together.  The
+            # current refresh cadence therefore controls the bundle cadence;
+            # one TLS handshake is preferable to two independently allocated
+            # response paths on this device.
+            if current_due or forecast_due:
                 used_network = True
+                self.state.current_weather_last_attempted = now_ms
                 self.state.weather_forecast_last_attempted = now_ms
-                if not weather_workspace_released:
-                    release_display_workspace()
-                    gc.collect()
-                weather_forecast = fetch_weather_forecast(
+                release_display_workspace()
+                gc.collect()
+                weather_bundle = fetch_weather_bundle(
                     self.weather_latitude,
                     self.weather_longitude,
                     days_limit=5,
                     timezone_offset=self.time_zone_offset,
                 )
-                if weather_forecast:
+                if weather_bundle:
+                    current_weather, weather_forecast = weather_bundle
+                    updated_ms = time.ticks_ms()
+                    self.state.current_weather = current_weather
                     self.state.weather_forecast = weather_forecast
-                    self.state.weather_forecast_last_updated = time.ticks_ms()
+                    self.state.current_weather_last_updated = updated_ms
+                    self.state.weather_forecast_last_updated = updated_ms
 
-            # Clear current weather data if older than 30 minutes
-            if time.ticks_diff(time.ticks_ms(), self.state.current_weather_last_updated) > CURRENT_WEATHER_MAX_AGE_MS:
-                self.state.current_weather = None
-
-            # Clear weather forecast data if older than 4 hours
-            if time.ticks_diff(time.ticks_ms(), self.state.weather_forecast_last_updated) > FORECAST_MAX_AGE_MS:
-                self.state.weather_forecast = None
-
+            return used_network
+        except Exception as e:
+            print("Error: Weather update failed; retaining last-known-good data. {}".format(e))
             return used_network
         finally:
             gc.collect()

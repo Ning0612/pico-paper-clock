@@ -12,7 +12,7 @@ main.py
        └─ LanConfigServer / AP web server → wifi_manager dispatcher
 ```
 
-啟動時先連線、同步 NTP 時間並嘗試發送 Discord LAN IP 通知；在載入控制器、顯示與感測器工作路徑前，會利用低記憶體窗口 flush pending Discord queue，再復原圖片交易檔並建立 LAN server。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
+啟動時先連線、同步 NTP 時間；只有設定 Discord webhook 時才 lazy import notifier、發送 LAN IP 通知並在載入控制器、顯示與感測器工作路徑前利用低記憶體窗口 flush pending queue。之後復原圖片交易檔並建立 LAN server。LAN 與 AP 共用路由；AP 額外保留按鈕長按、閒置 timeout、profile fallback 與 reboot 工作。
 
 `main.py` 會在建立 controller 之前無條件畫出開機畫面，因此主迴圈接手時面板一定是醒著且有內容的。離席時的顯示收斂據此設計為**狀態驅動**：`state.display_asleep` 初值為 `False`，主迴圈只要看到 presence 不在席且旗標未設，就清屏、送入睡眠並設起旗標。之所以不能只監聽在席→離席的轉換，是因為在暗處開機時根本不存在該轉換（第一輪就已是離席），開機畫面會因此永遠留在面板上、電子紙也不會睡眠——而 Discord 記憶體保底重啟正好讓「暗處開機」成為常態路徑（見下方記憶體邊界）。圖片預覽也一併改為在迴圈開頭消耗、在在席分支繪製，**只取代該輪的頁面渲染而不短路整輪迴圈**；離席時預覽丟棄不繪製，面板維持睡眠。原本在迴圈開頭 `return` 的寫法讓客戶端只要每輪送一次 `preview=true`，就能使 `presence.update()`（連帶離席 debounce）、環境取樣、按鈕處理與 `_check_discord_stall()` 永遠不執行。
 
@@ -25,7 +25,7 @@ main.py
 - 長生命週期 controller、presence、image store/catalog 使用 `__slots__`。
 - Discord webhook 不使用 `urequests.Response` 路徑，改用 raw `ssl` socket：只建立固定大小的 HTTP headers/payload、處理 partial write、讀取 status line 後立即關閉 socket；送出前後執行 `gc.collect()`，並暫時調整 GC threshold 後恢復原值。NTP 會在第一次 TLS 呼叫前同步；目前 firmware tree 尚未附帶 CA trust anchor，因此此連線仍不能宣稱完成憑證鏈／hostname 驗證，正式部署前需補上 CA bundle，不能以不驗證的 TLS 取代。
 - Discord JSON payload 以單一 `bytearray` 組裝，避免字串串接時留下額外完整 payload copy；Discord socket 在建立與 TLS 前會記錄 heap free/allocated telemetry。
-- 啟動通知與 pending Discord queue 在 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試，pending queue 則保留到下一次可用窗口（`presence_pending.log`／`presence_session_pending.log` 另有 7 天保留上限，超過天數的通知會被裁切捨棄，不會無限期等待重試，見下方「Flash 儲存邊界」）。
+- 啟動通知與 pending Discord queue 在 webhook 已設定時，於 `main.py` 的低依賴啟動階段先執行，避開 controller/weather 後續模組 import 與 display/hardware 工作物件建立造成的 heap 碎片；未設定 webhook 時不載入 notifier，也不對 pending queue 做無效的 flush。第一次失敗不阻塞主程式，controller 會在 45 秒後、每 30 秒重試，pending queue 則保留到下一次可用窗口（`presence_pending.log`／`presence_session_pending.log` 另有 7 天保留上限，超過天數的通知會被裁切捨棄，不會無限期等待重試，見下方「Flash 儲存邊界」）。
 - **記憶體自動重啟後，IP 未變就不再送「已上線」通知**。那次重啟買到的是唯一一個可用的 TLS 窗口，而啟動階段原本第一件事就是重發一則使用者早已知道的 IP 通知，把窗口用掉、pending 在席通知只能再等下一次重啟（至少 2 小時）。`_check_discord_stall()` 因此在 `machine.reset()` 前把當下**已公告過**的 IP 寫入 `discord_autoreset_ip.log`，`main.py` 在啟動窗口讀取後立即刪除：IP 相同就跳過通知並標記為已送（避免 controller 每 30 秒重試），窗口留給 `flush_startup_discord()`。只記錄確實送出過的 IP——從未公告成功的位址仍要照常嘗試，否則使用者無從得知裝置在哪。記錄採**讀取即消費**，所以手動斷電重開、或 IP 真的變了，都會照常送出；消費在「是否連上網路」的判斷之外執行，否則一次沒連上線的開機會把記錄留給後面某次本該公告的開機。刪除失敗時視為「沒有消費到任何東西」並照常公告——殘留的記錄否則會在每一次相同 IP 的開機持續抑制通知，多送一則遠優於從此靜默。「IP 沒變」的定義就是 IPv4 字串相同：換到另一個網路卻拿到相同位址時同樣會被抑制，但公告過的 URL 在該網路上仍然可用，且記錄只存活於「自動重啟 → 它造成的那次開機」之間，搬移裝置必然經過斷電而清掉記錄。
 - Discord `ENOMEM` 會回傳可重試結果；presence queue 在記憶體壓力後暫停一個 flush interval，之後自動恢復嘗試，不丟棄 pending session/summary。
 - **TLS 需要的是連續區塊，不是可用總量**。`ssl.wrap_socket` 的成敗門檻量測（MicroPython 1.24.1，2026-07-25，純 `.py` 部署）：最大連續區塊 17,920 B 時直接 `OSError [Errno 12] ENOMEM`，23,120 B 時成功。`TLS_MIN_CONTIGUOUS_BYTES` = 20 KiB 即取自這段區間。實測清除天氣快取與重複 `gc.collect()` 對最大連續區塊完全無效。
@@ -40,20 +40,20 @@ main.py
 - 自動重啟的保險：pending 未能寫入 flash（`pending_persist_failed`）時放棄重啟，否則會遺失只存在於 RAM 的通知；冷卻時間戳寫入失敗時放棄重啟並封鎖本次開機（fail-safe，不重啟優於 boot loop）；`discord_autoreset.log` 於執行期即時評估，冷卻可在運行中自然到期。**冷卻檔只有「檔案不存在」是 fail-open，其餘一律 fail-closed**：不存在代表從未自動重啟過，第一次不可被擋；其他讀取錯誤（`OSError` 非 ENOENT）與時鐘不可用則直接拒絕，因為此時冷卻狀態是「未知」，而未知不能讀成「允許」——間歇性的 flash 讀取失敗否則每失敗一次就放行一次重啟。檔案存在但內容不可用（截斷寫入、區塊損毀、`<= 0` 的數值）則重寫一個新的時間戳並拒絕本次重啟；若連重寫都失敗就設起 `auto_reset_blocked`，與呼叫端寫入失敗時的處置一致。**時間戳比當下時鐘還新時同樣走重寫路徑**：Pico W 沒有電池供電的 RTC，NTP 同步失敗的那次開機會讓 `time.time()` 從 port epoch 重新起算，於是由已同步開機寫下的時間戳永遠落在未來、差值恆為負；把它讀成「冷卻未到期」會讓保底重啟一路被封鎖到 NTP 再次成功，讀成「已到期」則會每輪都放行、而每次重啟又重置時基。重寫成當下時基並等滿一次冷卻是唯一不會卡死也不會失控的處置。把損毀讀成「從未重啟過」等於放棄唯一的 boot-loop 防護，而在離席門檻（約 2 分鐘）下那會退化成每次 uptime gate 到期就重開一次。
 - **離席分支的清屏睡眠必須包在 try/except 內**：`main.py` 以 `while True: controller.run_main_loop()` 裸迴圈驅動、未包例外處理，而 `clear_display_and_sleep()` 位於 `_check_discord_stall()` 之前，因此它拋出的例外會終止整個主程式，並讓最需要保底重啟的時刻永遠等不到重啟。失敗時不設起 `display_asleep`，但改以 `DISPLAY_SLEEP_RETRY_MS`（60 秒）退避後再試——完整清屏加面板初始化的成本太高，每秒重試一次會排擠 LAN polling、presence 更新與 stall 檢查並灌爆 UART log。「開機滿 5 分鐘」以 latch 記錄而非每次重算——`ticks_ms()` 為 30-bit、`ticks_diff()` 僅在約 ±6.2 天內有效，而這個故障正好出現在約 12 天的連續運行之後。
 - DHT22 使用 2500 ms 最小讀取間隔；讀取失敗改用 10 秒 backoff，保留上一筆快取值，避免感測器錯誤反覆消耗 heap 與刷 serial log。
-- 天氣資料改由 Open-Meteo 提供：current request 取得目前溫度與 WMO condition code，daily request 取得 5 天平均/高低溫、降雨機率與降水量；以 `response.json()` 解析小型 5-day payload，完成後立即釋放 response 與資料物件並回收 heap。既有 display icon 名稱由 WMO code mapping 保持不變。
-- 天氣 request 前、response 取得後與 forecast parse 後會記錄 heap telemetry；API 的 `timezone` 由 profile 的固定 `timezone_offset` 轉成 IANA `Etc/GMT` zone，使預報日期與裝置日期一致。Presence API 的記憶體讀取介面只保留最近 128 筆事件與 366 筆 daily lines，且單行最多讀取 256 字元；完整串流 API 仍逐行送出。
+- 天氣資料改由 Open-Meteo 提供：單一 bundle request 同時取得 current 溫度/WMO condition code 與 daily 5 天平均溫度、WMO condition code、最大降雨機率；以 `response.json()` 解析小型 5-day payload，只有兩者都成功才原子更新 last-known-good snapshot，失敗時保留既有資料並回收 heap。既有 display icon 名稱由 WMO code mapping 保持不變。
+- 天氣 bundle request 前、response 取得後與 parse 後會記錄 heap telemetry；API 的 `timezone` 由 profile 的固定 `timezone_offset` 轉成 IANA `Etc/GMT` zone，使預報日期與裝置日期一致。Presence API 的記憶體讀取介面只保留最近 128 筆事件與 366 筆 daily lines，且單行最多讀取 256 字元；完整串流 API 仍逐行送出。
 - `/api/v1/device` 的 `heap_free` 可作為現場基線；完整 peak／長跑數據仍需接上指定 Pico 後量測。
 
 ### 記憶體問題的處理原則
 
 ```text
 啟動 Wi-Fi
-  └─ raw HTTPS Discord webhook
+  └─ webhook 已設定時才載入 raw HTTPS Discord webhook
        ├─ 成功：記錄已送出，釋放 socket
        └─ ENOMEM：保留可重試狀態，不阻塞主迴圈
             ↓
 載入 display / HardwareManager / AppController
-  └─ 天氣 forecast 以 5-day JSON payload 解析並立即釋放
+  └─ 天氣 bundle 以單一 5-day JSON payload 解析並立即釋放
   └─ DHT22 依時間節流，失敗使用 backoff 與快取
 ```
 

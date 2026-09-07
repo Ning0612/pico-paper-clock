@@ -2,6 +2,7 @@ import ast
 import importlib.util
 import re
 import sys
+import symtable
 import time
 import types
 import unittest
@@ -44,6 +45,7 @@ class AppControllerDateChangeTests(unittest.TestCase):
 
         weather_module = types.ModuleType("weather")
         weather_module.fetch_current_weather = lambda *_args: None
+        weather_module.fetch_weather_bundle = lambda *_args, **_kwargs: None
         weather_module.fetch_weather_forecast = lambda *_args, **_kwargs: []
         sys.modules["weather"] = weather_module
 
@@ -110,7 +112,7 @@ class AppControllerDateChangeTests(unittest.TestCase):
         self.sync_calls.clear()
         self.clear_calls.clear()
 
-    def test_new_day_resets_weather_retry_gates(self):
+    def test_new_day_resets_weather_retry_gates_but_retains_weather(self):
         state = types.SimpleNamespace(
             last_day=16,
             current_weather=(30, "Clouds"),
@@ -126,8 +128,8 @@ class AppControllerDateChangeTests(unittest.TestCase):
 
         self.assertTrue(controller._handle_date_change(17))
         self.assertEqual(state.last_day, 17)
-        self.assertIsNone(state.current_weather)
-        self.assertIsNone(state.weather_forecast)
+        self.assertEqual(state.current_weather, (30, "Clouds"))
+        self.assertEqual(state.weather_forecast, [("07-16", 29, "Clouds", 20)])
         self.assertEqual(state.current_weather_last_updated, -1)
         self.assertEqual(state.current_weather_last_attempted, -1)
         self.assertEqual(state.weather_forecast_last_updated, -1)
@@ -156,24 +158,21 @@ class AppControllerDateChangeTests(unittest.TestCase):
 
         original_ticks_ms = getattr(time, "ticks_ms", None)
         original_ticks_diff = getattr(time, "ticks_diff", None)
-        original_current = self.module.fetch_current_weather
-        original_forecast = self.module.fetch_weather_forecast
+        original_bundle = self.module.fetch_weather_bundle
         calls = []
         try:
             time.ticks_ms = lambda: 100000
             time.ticks_diff = lambda new, old: new - old
-            self.module.fetch_current_weather = lambda *_args: calls.append("current") or (30, "Clouds")
-            self.module.fetch_weather_forecast = lambda *_args, **kwargs: calls.append(
-                ("forecast", kwargs["days_limit"])
-            ) or [("07-17", 29, "Clouds", 20)]
+            self.module.fetch_weather_bundle = lambda *_args, **kwargs: calls.append(
+                ("bundle", kwargs["days_limit"])
+            ) or ((30, "Clouds"), [("07-17", 29, "Clouds", 20)])
 
             controller._handle_date_change(17)
 
             self.assertTrue(controller._update_weather())
-            self.assertEqual(calls, ["current", ("forecast", 5)])
+            self.assertEqual(calls, [("bundle", 5)])
         finally:
-            self.module.fetch_current_weather = original_current
-            self.module.fetch_weather_forecast = original_forecast
+            self.module.fetch_weather_bundle = original_bundle
             if original_ticks_ms is None:
                 delattr(time, "ticks_ms")
             else:
@@ -182,6 +181,46 @@ class AppControllerDateChangeTests(unittest.TestCase):
                 delattr(time, "ticks_diff")
             else:
                 time.ticks_diff = original_ticks_diff
+
+    def test_weather_failure_retains_last_known_good_data(self):
+        state = types.SimpleNamespace(
+            last_day=17,
+            current_weather=(30, "Clear"),
+            current_weather_last_updated=1,
+            current_weather_last_attempted=-1,
+            weather_forecast=[("07-17", 29, "Clouds", 20)],
+            weather_forecast_last_updated=1,
+            weather_forecast_last_attempted=-1,
+            is_first_run=False,
+        )
+        controller = object.__new__(self.module.AppController)
+        controller.state = state
+        controller.weather_latitude = 24.6855
+        controller.weather_longitude = 120.8789
+        controller.time_zone_offset = 8
+
+        original_bundle = self.module.fetch_weather_bundle
+        original_ticks_ms = getattr(time, "ticks_ms", None)
+        original_ticks_diff = getattr(time, "ticks_diff", None)
+        try:
+            time.ticks_ms = lambda: 2000000
+            time.ticks_diff = lambda new, old: new - old
+            self.module.fetch_weather_bundle = lambda *_args, **_kwargs: None
+
+            self.assertTrue(controller._update_weather())
+            self.assertEqual(state.current_weather, (30, "Clear"))
+            self.assertEqual(state.weather_forecast, [("07-17", 29, "Clouds", 20)])
+        finally:
+            self.module.fetch_weather_bundle = original_bundle
+            if original_ticks_ms is None:
+                delattr(time, "ticks_ms")
+            else:
+                time.ticks_ms = original_ticks_ms
+            if original_ticks_diff is None:
+                delattr(time, "ticks_diff")
+            else:
+                time.ticks_diff = original_ticks_diff
+
 
     def test_confirmed_away_transition_clears_display_once(self):
         class FakePresence:
@@ -635,12 +674,55 @@ class AppControllerDateChangeTests(unittest.TestCase):
         return clock
 
 
+class LazyImportContractTests(unittest.TestCase):
+    def test_main_has_no_top_level_discord_import(self):
+        source_path = Path(__file__).resolve().parents[1] / "src" / "main.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        top_level_imports = [
+            node for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ]
+        self.assertFalse(
+            any(
+                isinstance(node, ast.ImportFrom) and node.module == "discord_notifier"
+                for node in top_level_imports
+            )
+        )
+
+    def test_app_controller_has_no_top_level_discord_import(self):
+        source_path = Path(__file__).resolve().parents[1] / "src" / "app_controller.py"
+        tree = ast.parse(source_path.read_text(encoding="utf-8"))
+        top_level_imports = [
+            node for node in tree.body
+            if isinstance(node, (ast.Import, ast.ImportFrom))
+        ]
+        self.assertFalse(
+            any(
+                isinstance(node, ast.ImportFrom) and node.module == "discord_notifier"
+                for node in top_level_imports
+            )
+        )
+
+    def test_main_transfers_startup_weather_state_as_module_globals(self):
+        source_path = Path(__file__).resolve().parents[1] / "src" / "main.py"
+        source = source_path.read_text(encoding="utf-8")
+        table = symtable.symtable(source, str(source_path), "exec")
+        main_scope = next(child for child in table.get_children() if child.get_name() == "main")
+        self.assertTrue(main_scope.lookup("_startup_weather_current").is_global())
+        self.assertTrue(main_scope.lookup("_startup_weather_forecast").is_global())
+
+
 class DiscordStallResetTests(unittest.TestCase):
     """The reboot of last resort must fire only when Discord is genuinely wedged."""
 
     @classmethod
     def setUpClass(cls):
         cls.module = AppControllerDateChangeTests.module
+        cls.original_get_global = cls.module.config_manager.get_global
+        cls.module.config_manager.get_global = lambda key, default=None: (
+            "https://discord.com/api/webhooks/test/test"
+            if key == "discord_webhook_url" else default
+        )
         # Re-registered here rather than reused: the class above removes its own
         # discord_notifier stub in tearDownClass, and it runs first.  Without this
         # the `from discord_notifier import ...` inside _check_discord_stall() just
@@ -656,6 +738,7 @@ class DiscordStallResetTests(unittest.TestCase):
 
     @classmethod
     def tearDownClass(cls):
+        cls.module.config_manager.get_global = cls.original_get_global
         if cls.original_discord_module is None:
             sys.modules.pop("discord_notifier", None)
         else:

@@ -166,6 +166,88 @@ def _parse_forecast_data(data, days_limit):
     return result
 
 
+def _parse_current_data(data):
+    current = data["current"]
+    return (
+        current["temperature_2m"],
+        _condition_from_code(current.get("weather_code")),
+    )
+
+
+def _validated_days_limit(days_limit):
+    try:
+        days_limit = int(days_limit)
+    except (TypeError, ValueError):
+        print("Error: Forecast day count is invalid.")
+        return None
+    if days_limit < 1 or days_limit > 16:
+        print("Error: Forecast day count must be between 1 and 16.")
+        return None
+    return days_limit
+
+
+def fetch_weather_bundle(latitude, longitude, days_limit=5, timezone_offset=8):
+    """Fetch current weather and daily forecast in one atomic request.
+
+    The caller receives both values only when the complete response is valid;
+    a failed or partial response returns None so the caller can retain its
+    last-known-good weather snapshot.
+    """
+    if not network.WLAN(network.STA_IF).isconnected():
+        print("Info: No internet connection. Skipping combined weather request.")
+        return None
+
+    days_limit = _validated_days_limit(days_limit)
+    if days_limit is None:
+        return None
+
+    print("Info: Fetching current weather and forecast for ({}, {}).".format(
+        latitude, longitude
+    ))
+    url = _forecast_url(
+        latitude,
+        longitude,
+        "current=temperature_2m,weather_code&daily=weather_code,temperature_2m_mean,precipitation_probability_max&forecast_days={}".format(
+            days_limit
+        ),
+        timezone_offset,
+    )
+    response = _make_request_with_retry(url)
+    if not response:
+        return None
+
+    try:
+        data = response.json()
+        current = _parse_current_data(data)
+        forecast = _parse_forecast_data(data, days_limit)
+        if len(forecast) < days_limit:
+            print("Warning: Combined weather response returned only {} of {} requested days.".format(
+                len(forecast), days_limit
+            ))
+            return None
+        del data
+        gc.collect()
+        _log_heap("after combined weather parse")
+        return current, forecast
+    except (ValueError, AttributeError, KeyError) as e:
+        print("Error: Failed to parse combined weather data. Details: {}".format(e))
+        return None
+    except MemoryError:
+        print("Error: Memory allocation failed during combined weather processing.")
+        gc.collect()
+        return None
+    except Exception as e:
+        print("Error: Unexpected combined weather exception. Details: {}".format(e))
+        return None
+    finally:
+        try:
+            response.close()
+        except Exception:
+            pass
+        response = None
+        gc.collect()
+
+
 def fetch_current_weather(latitude, longitude, timezone_offset=8):
     """Fetches current weather information for a coordinate pair."""
     if not network.WLAN(network.STA_IF).isconnected():
@@ -187,11 +269,7 @@ def fetch_current_weather(latitude, longitude, timezone_offset=8):
 
     try:
         data = response.json()
-        current = data["current"]
-        result = (
-            current["temperature_2m"],
-            _condition_from_code(current.get("weather_code")),
-        )
+        result = _parse_current_data(data)
         del data
         gc.collect()
         _log_heap("after current weather parse")
@@ -221,13 +299,8 @@ def fetch_weather_forecast(latitude, longitude, days_limit=5, timezone_offset=8)
         print("Info: No internet connection. Skipping weather forecast request.")
         return []
 
-    try:
-        days_limit = int(days_limit)
-    except (TypeError, ValueError):
-        print("Error: Forecast day count is invalid.")
-        return []
-    if days_limit < 1 or days_limit > 16:
-        print("Error: Forecast day count must be between 1 and 16.")
+    days_limit = _validated_days_limit(days_limit)
+    if days_limit is None:
         return []
 
     print("Info: Fetching weather forecast for ({}, {}).".format(latitude, longitude))
