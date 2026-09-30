@@ -5,6 +5,25 @@
 格式遵循 [Keep a Changelog](https://keepachangelog.com/en/1.0.0/)，
 且本專案遵循 [Semantic Versioning](https://semver.org/spec/v2.0.0.html)。
 
+## [2.7.0] - 2026-10-01
+
+本版本把天氣資料來源從 OpenWeatherMap 換成 Open-Meteo。起因是 OpenWeatherMap API 在部分網路環境下連不上，天氣頁因此長期停在 fallback；Open-Meteo 不需要 API Key，設定改為每個 profile 填經緯度。設定檔 schema 升為 v4，舊設定會在開機時自動遷移。
+
+### Changed
+
+- 天氣資料改由 Open-Meteo 提供：單一 request 同時取得目前溫度／WMO 天氣代碼與 5 天每日預報（平均溫度、WMO 代碼、最大降雨機率），兩者都解析成功才原子更新快取，失敗時沿用上一份有效資料。WMO 代碼對應到既有的天氣圖示，顯示端不變。預報日期以 profile 的固定 `timezone_offset` 換算成 `Etc/GMT` 時區送給 API，與裝置日期一致。
+- 設定檔 schema v3 → v4：移除 `global.weather_api_key`；`profile.weather_location`（城市名稱）改為 `profile.weather_latitude`／`profile.weather_longitude`（範圍 −90～90／−180～180）。開機時自動遷移：內建範例城市會離線對應成座標；無法對應的舊值保存在 `legacy_weather_location` 作為人工恢復提示，並先使用台北預設座標，需到設定頁填入正確座標。Web UI 設定頁同步改為經緯度欄位。
+
+### Added
+
+- 設定頁新增地圖選點：可點擊地圖或拖曳標記來選擇天氣查詢位置，經緯度欄位同步更新。地圖（Leaflet 與 OpenStreetMap 圖磚）由瀏覽器直接載入，不儲存在 Pico W、也不經由 Pico W 代理；瀏覽器連不到地圖服務時仍可直接輸入座標。
+- 部署工具（`tools/pico_deploy/upload_cli.py` 與 GUI）預設**不再上傳或刪除**裝置上的 `config.json`，需明確指定 `--include-config` 才會以本機設定覆寫，避免重新部署時蓋掉裝置上的設定。
+
+### Fixed
+
+- 修正設定頁每次載入都掃描 Wi-Fi、拖慢頁面的問題：載入時只顯示目前 profile 的 SSID，需要換網路時再按「掃描」。
+- 降低啟動時天氣模組的 heap 壓力：天氣改為單一 bundle request；未設定 Discord webhook 時不再載入 notifier 模組，也不對 pending queue 做無效的 flush。
+
 ## [2.6.1] - 2026-07-28
 
 本版本把 v2.6.0 引入的 Discord 保底自動重啟機制修到堪用：縮短離席時的恢復延遲、補上三個會讓保底重啟失效或反而害死主程式的容錯缺陷，並停止把重啟換來的唯一 TLS 窗口浪費在重發使用者早已知道的 IP 上。
